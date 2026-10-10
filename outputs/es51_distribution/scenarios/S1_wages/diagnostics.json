@@ -1,0 +1,196 @@
+{
+  "multipliers": [
+    2.9138460481884807,
+    2.6528508372981143,
+    2.53949490858124,
+    1.9220752939501469,
+    1.9220752939501466,
+    1.9220752939501464,
+    2.05409717936338,
+    1.9581473729905672,
+    1.3270352968813015,
+    1.847590523211812,
+    1.588772501681371,
+    1.6416790593891666,
+    2.2907212130065218,
+    2.6549648136628727,
+    2.38783965059248,
+    1.9728687673056704,
+    2.1410258284484627,
+    1.9465644595307956,
+    1.3739485985750681,
+    2.1403604053455014,
+    1.5514380704884563,
+    1.610404976336378,
+    2.3691664807644264,
+    2.4598611462937883,
+    2.408421083089543,
+    2.0056247269520693,
+    2.127408339579788,
+    2.247608902672971,
+    1.5758907828496418,
+    2.051126037598498,
+    1.6368657799951383,
+    1.8065829490258778
+  ],
+  "condition_number": 3.1753889593779947,
+  "n_negative_coefficients": 56,
+  "max_column_sum": 0.7814452125454486,
+  "spectral_radius": 0.5508221676276663,
+  "balance_info": {
+    "method": "GRAS",
+    "reason": "56 negative cell(s) in the expanded table; RAS is undefined there (CORE_012 Box 11.3, p. 345)",
+    "converged": true,
+    "iterations": 1,
+    "solver_step": 6.661338147750939e-16,
+    "tolerance": 1e-09,
+    "scope": "internal block of each of 1 split(s)",
+    "iterations_per_split": {
+      "G-I": 1
+    },
+    "margin_imbalance": 3.725290298461914e-09,
+    "margin_tolerance": 0.00609185165832651,
+    "n_negative_seed": 56,
+    "n_negative_result": 56,
+    "sign_changes": 0,
+    "max_row_dev": 9.313225746154785e-10,
+    "max_col_dev": 2.3283064365386963e-10
+  },
+  "reaggregation": {
+    "max_abs_error": 1.8189894035458565e-12,
+    "max_pct_error": 1.6851234378121833e-14,
+    "total_original": 18026171.028568964,
+    "total_reaggregated": 18026171.028568964,
+    "total_abs_error": 0.0,
+    "untouched_max_abs_error": 0.0,
+    "split_row_abs_error": 1.8189894035458565e-12,
+    "split_col_abs_error": 1.8189894035458565e-12
+  },
+  "user_constraints_overridden": [],
+  "splits": [
+    {
+      "sector_code": "G-I",
+      "sector_label": "Distribution",
+      "new_codes": [
+        "G",
+        "H",
+        "I"
+      ],
+      "positions": [
+        3,
+        4,
+        5
+      ],
+      "keys_used": {
+        "output": "key_wages_sbs_2018",
+        "final_demand": "key_wages_sbs_2018",
+        "value_added": "key_wages_sbs_2018",
+        "intermediate_rows": "key_wages_sbs_2018",
+        "intermediate_cols": "key_wages_sbs_2018"
+      },
+      "keys_inherited": {
+        "output": false,
+        "final_demand": true,
+        "value_added": true,
+        "intermediate_rows": true,
+        "intermediate_cols": true
+      },
+      "va_rows": {
+        "pinned": {},
+        "residual_row": null,
+        "residual_shares": null
+      },
+      "profile_shift": null,
+      "profile_provenance": null,
+      "key_meta": {
+        "key_wages_sbs_2018": {
+          "strength": "medium",
+          "source": "Eurostat, Structural business statistics by NUTS 2 region and NACE Rev. 2 (sbs_r_nuts06_r2), Catalonia, 2018, wages and salaries (V13320), million euro",
+          "source_year": 2018
+        }
+      },
+      "weights": {
+        "output": [
+          0.6269143589238199,
+          0.19955651916822706,
+          0.17352912190795308
+        ],
+        "final_demand": [
+          0.6269143589238199,
+          0.19955651916822706,
+          0.17352912190795308
+        ],
+        "value_added": [
+          0.6269143589238199,
+          0.19955651916822706,
+          0.17352912190795308
+        ],
+        "intermediate_rows": [
+          0.6269143589238199,
+          0.19955651916822706,
+          0.17352912190795308
+        ],
+        "intermediate_cols": [
+          0.6269143589238199,
+          0.19955651916822706,
+          0.17352912190795308
+        ]
+      },
+      "original_diagonal": 13588.49496339961,
+      "internal_block_share_pct": 0.07538203727160772,
+      "input_structure": {
+        "max_abs_difference": 6.938893903907228e-17,
+        "mean_cosine_distance": -3.700743415417188e-17,
+        "differentiated": false,
+        "profiled": false,
+        "n_subsectors": 3,
+        "by_subsector": {
+          "G": 0.44168159524737205,
+          "H": 0.44168159524737205,
+          "I": 0.441681595247372
+        }
+      },
+      "code_check": "G-I -> G, H, I: codes are not in a recognised classification, so the hierarchy was not checked",
+      "code_check_ok": true,
+      "code_check_unchecked": [
+        "codes not parsed as a classification"
+      ],
+      "headroom_pct": 17.352912190795287,
+      "tightest_internal_total": 2357.9995990493744,
+      "parent_diagonal": 13588.49496339961,
+      "iterations": 1,
+      "corroboration": [
+        {
+          "key_id": "key_headcount_sbs_2018",
+          "compared_against_block": "output",
+          "source": "Eurostat, Structural business statistics by NUTS 2 region and NACE Rev. 2 (sbs_r_nuts06_r2), Catalonia, 2018, persons employed (V16110), number",
+          "source_year": 2018,
+          "strength": "medium",
+          "rows": [
+            {
+              "code": "G",
+              "implied": 0.6269143589238199,
+              "measured": 0.5791466275484477,
+              "gap": 0.08247951227407642
+            },
+            {
+              "code": "H",
+              "implied": 0.19955651916822706,
+              "measured": 0.16837642781831555,
+              "gap": 0.18518085787849112
+            },
+            {
+              "code": "I",
+              "implied": 0.17352912190795308,
+              "measured": 0.2524769446332368,
+              "gap": -0.31269319596673695
+            }
+          ],
+          "max_abs_gap": 0.31269319596673695
+        }
+      ],
+      "corroboration_skipped": [],
+      "corroboration_covers": "subsector shares, which is everything this split varies"
+    }
+  ]
+}

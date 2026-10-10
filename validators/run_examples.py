@@ -49,7 +49,8 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "examples"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from run_published_runs import published                      # noqa: E402
+from run_published_runs import (published, missing_inputs,     # noqa: E402
+                                REQUIRES as PUBLISHED_REQUIRES)
 
 # What each example needs before it can run at all.
 #
@@ -66,11 +67,6 @@ REQUIRES: dict[str, tuple[Path, ...]] = {
     "synthetic_accommodation": (),
     "uk_hospitality": (ROOT / "UK_IOAT_2023_domestic_ixi.xlsx",),
     "es_hosteleria": (ROOT / "data" / "ine" / "cne_tio_22.xlsx",),
-    "uk_food_beverage": (ROOT / "UK_IOAT_2023_domestic_ixi.xlsx",),
-    "es51_distribution": (
-        ROOT / "data" / "eurostat" / "sbs_r_nuts06_r2_ES51_2018_V13320.json",
-        ROOT / "data" / "eurostat" / "sbs_r_nuts06_r2_ES51_2018_V16110.json",
-    ),
 }
 FAIL: list[str] = []
 NOTHING_CHECKED = 3
@@ -96,17 +92,29 @@ def main() -> int:
     ran = 0
     for script in scripts:
         name = script.stem
-        declared = name in REQUIRES
+        # A published example is normally skipped above, but a tree can hold
+        # the script and not the published folder -- `outputs/` is maintained
+        # by hand in the public repository, and on 2026-10-10 a copy of one
+        # arrived after the suite had started and then turned out to be
+        # gitignored. In that case the example lands here, and what it needs is
+        # whatever run_published_runs.py says it needs: that table knows the
+        # archive arrives in either of two forms, which this one has no reason
+        # to learn twice.
+        theirs = name in PUBLISHED_REQUIRES
+        declared = theirs or name in REQUIRES
         check(f"{name}: what it needs before it can run is declared", declared,
-              ", ".join(p.name for p in REQUIRES.get(name, ())) or "nothing"
+              ("declared in run_published_runs.py, which usually runs it"
+               if theirs else
+               ", ".join(p.name for p in REQUIRES.get(name, ())) or "nothing")
               if declared else
               "add it to REQUIRES in this file, or to run_published_runs.py if "
               "its run is published")
         if not declared:
             continue
 
-        gaps = [str(p.relative_to(ROOT)) for p in REQUIRES[name]
-                if not p.exists()]
+        gaps = (missing_inputs(name) if theirs else
+                [str(p.relative_to(ROOT)) for p in REQUIRES[name]
+                 if not p.exists()])
         if gaps:
             print(f"    --   not run here: {', '.join(gaps)} is not in this "
                   f"tree")

@@ -1,0 +1,133 @@
+{
+  "project_id": "es51_distribution",
+  "generated_at": "2026-09-27T12:35:23.744459+00:00",
+  "scenario_ids": [
+    "S1_wages",
+    "S2_headcount"
+  ],
+  "scenarios_removed_as_stale": [],
+  "quadrium_version": "0.2.0",
+  "environment": {
+    "python": "3.10.9",
+    "numpy": "1.26.4",
+    "platform": "macOS-26.6.2-arm64-arm-64bit"
+  },
+  "input": {
+    "path": null,
+    "sha256": null,
+    "note": "The hash exists so that a silently revised input vintage is detectable. A reproducibility record that names a file without fixing its contents is not one."
+  },
+  "table": {
+    "table_id": "EU_MRIO_2018_ES51_with_rest",
+    "country": "ES51",
+    "year": 2018,
+    "unit": "million US dollars: Huang & Koutroumpis (2023) state it, and the archive's own country totals are Eurostat's value added converted at each year's euro-dollar rate, which no other currency fits (`run_mrio_scale.py`); price basis not stated",
+    "classification": "10 sectors, NACE Rev. 2 sections grouped as the archive groups them, in three blocks; NUTS-2 as coded in the archive",
+    "source": "Huang, S. & Koutroumpis, P. (2023), European multi regional input output data for 2008-2018, Scientific Data 10, 218, doi:10.1038/s41597-023-02117-y; Zenodo record 7875024, CC BY 4.0 (MRIO_2018_272regions.xlsx, Final_demand_2018.xlsx, TAXSUB_VA_2018.xlsx)",
+    "n_sectors": 30,
+    "notes": "THREE BLOCKS THAT COVER THE ARCHIVE: ES51, the rest of ES (18 regions) and the rest of the archive (253 regions). Every cell is the archive's own flows added up, and this region's own block is the one-region table's cell for cell. Because the three cover the archive, the trade between regions is intermediate demand here rather than a final-demand column: what a one-region table omits -- 16.4 % of this region's output multipliers, nearly all of it output set off in the other two blocks rather than a return to this one -- is inside these multipliers. What it costs is that the other two blocks are aggregates, whose technology is a mix of the regions inside them. NEITHER IDENTITY CLOSES IN THIS ARCHIVE: the row residue is 15.5 % of output and the column residue 7.4 %, both carried in a labelled RESIDUAL column and row computed here. NPISH is identical to GGFC on every row of the final-demand file and was dropped rather than counted twice. A sector code names THIS region's block: the three blocks carry the same ten codes, as an interregional table must, and this region goes first, so a split of `G-I` divides ES51's G-I and not an aggregate's. Every cell is ESTIMATED, as the whole archive is, and the unit is the archive's.",
+    "negatives": {
+      "Z": 20,
+      "Y": 22,
+      "VA": 29
+    }
+  },
+  "splits": [
+    {
+      "sector_code": "G-I",
+      "sector_label": "Distribution",
+      "into": {
+        "G": "Wholesale and retail trade",
+        "H": "Transport and storage",
+        "I": "Accommodation and food service"
+      },
+      "keys_by_block": {},
+      "input_profiles": {}
+    }
+  ],
+  "allocation_keys": {
+    "key_wages_sbs_2018": {
+      "applies_to": "output",
+      "source": "Eurostat, Structural business statistics by NUTS 2 region and NACE Rev. 2 (sbs_r_nuts06_r2), Catalonia, 2018, wages and salaries (V13320), million euro",
+      "source_year": 2018,
+      "strength": "medium",
+      "new_sector_codes": [
+        "G",
+        "H",
+        "I"
+      ],
+      "raw_values": [
+        12722.6,
+        4049.8,
+        3521.6
+      ],
+      "weights": [
+        0.6269143589238199,
+        0.19955651916822706,
+        0.17352912190795308
+      ],
+      "notes": null
+    },
+    "key_headcount_sbs_2018": {
+      "applies_to": "output",
+      "source": "Eurostat, Structural business statistics by NUTS 2 region and NACE Rev. 2 (sbs_r_nuts06_r2), Catalonia, 2018, persons employed (V16110), number",
+      "source_year": 2018,
+      "strength": "medium",
+      "new_sector_codes": [
+        "G",
+        "H",
+        "I"
+      ],
+      "raw_values": [
+        581147.0,
+        168958.0,
+        253349.0
+      ],
+      "weights": [
+        0.5791466275484477,
+        0.16837642781831555,
+        0.2524769446332368
+      ],
+      "notes": null
+    }
+  },
+  "scenarios": [
+    {
+      "scenario_id": "S1_wages",
+      "label": "Wages (real)",
+      "description": "Output, final demand and the intermediate blocks split by Eurostat's regional wages and salaries for sections G, H and I. Wages are the closest published proxy to value at NUTS-2: the regional SBS carries no turnover and no value added.",
+      "keys_by_block": {
+        "output": "key_wages_sbs_2018"
+      },
+      "balancing_method": "GRAS",
+      "balancing_tolerance": 1e-09,
+      "reaggregation_tolerance_pct": 1e-06,
+      "internal_block_alpha": 1.0,
+      "locked_cells": [],
+      "user_constraints": {}
+    },
+    {
+      "scenario_id": "S2_headcount",
+      "label": "Persons employed (real)",
+      "description": "The same split driven by headcount instead, kept to measure what the equal-productivity assumption costs: it gives accommodation and food 25.2 % of the sector where wages give it 17.4 %.",
+      "keys_by_block": {
+        "output": "key_headcount_sbs_2018"
+      },
+      "balancing_method": "GRAS",
+      "balancing_tolerance": 1e-09,
+      "reaggregation_tolerance_pct": 1e-06,
+      "internal_block_alpha": 1.0,
+      "locked_cells": [],
+      "user_constraints": {}
+    }
+  ],
+  "outcome": {
+    "scenarios_run": [
+      "S1_wages",
+      "S2_headcount"
+    ],
+    "scenarios_rejected": [],
+    "all_passed": true
+  },
+  "tolerances": "No published source states a numerical tolerance for an accounting identity, and six were searched: what a balance can be tested against is a property of the table, not of the method. The floor applied here is derived from the table's own stated precision — an identity summing n cells published to d decimals cannot be checked more tightly than 0.5*10^-d*n. Tolerances that remain a genuine choice are labelled PROJECT CHOICE where they are used."
+}

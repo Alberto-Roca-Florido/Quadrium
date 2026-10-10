@@ -7,10 +7,18 @@ __pycache__/
 #
 # The owner asked to see what a user would see before installing anything, and
 # until 2026-09-01 nothing here answered that -- outputs/ was empty AND ignored.
-# This one is verbatim output, regenerable with
-# `python3 examples/uk_food_beverage.py`.
+# These are verbatim output, each regenerable with the example of its own name.
+#
+# THE SECOND ONE WAS COPIED ACROSS AND SILENTLY IGNORED. On 2026-10-10
+# `outputs/es51_distribution/` was copied into the public tree, committed with
+# `git add -A`, and never arrived: this list re-included one folder by name and
+# nothing said the other was being dropped. CI then failed for a reason that
+# looked unrelated -- a validator found the script with no published run beside
+# it and tried to run it without the 33 MB archive. A published run that is not
+# in the repository is not published.
 outputs/*
 !outputs/uk_food_beverage/
+!outputs/es51_distribution/
 build/
 dist/
 *.egg-info/

@@ -1,0 +1,53 @@
+{
+  "project_id": "es51_distribution",
+  "assumptions": [
+    {
+      "assumption_id": "A-01",
+      "description": "The split rests on a COST proxy, not on output. The regional structural business statistics publish local units, wages and persons employed at NUTS-2, and neither turnover nor value added, so nothing published measures the three sections' output for Catalonia. S1 uses wages because they track value more closely than a headcount.",
+      "applies_to": "the size of every subsector",
+      "source": "Eurostat, Structural business statistics by NUTS 2 region and NACE Rev. 2 (sbs_r_nuts06_r2), Catalonia, 2018",
+      "validated_by": "MEASURED against the other published indicator: the two disagree most on `I`, 17.4 % by wages against 25.2 % by headcount, 7.9 points apart",
+      "confidence": "medium",
+      "impact_on_results": "up to 7.9 points of the parent's output on one subsector; the report prints both scenarios rather than ranking them",
+      "discarded_alternative": null,
+      "discard_reason": null,
+      "created_at": "2026-09-27T12:35:23.245274+00:00"
+    },
+    {
+      "assumption_id": "A-02",
+      "description": "Every subsector inherits the parent's input structure. With one allocation key the weight cancels in a_ij = Z_ij / X_j, so all three share `G-I`'s multiplier. Differentiating them would need purchasing profiles, and nothing published gives them for a NUTS-2 region.",
+      "applies_to": "the multipliers of G, H and I",
+      "source": "Sizes: Eurostat, Structural business statistics by NUTS 2 region and NACE Rev. 2 (sbs_r_nuts06_r2), Catalonia, 2018 || Structures: NOT ESTIMATED",
+      "validated_by": "not attempted",
+      "confidence": "strong",
+      "impact_on_results": "the three subsectors' multipliers are the parent's and should be quoted as such",
+      "discarded_alternative": null,
+      "discard_reason": null,
+      "created_at": "2026-09-27T12:35:23.245278+00:00"
+    },
+    {
+      "assumption_id": "A-03",
+      "description": "That sections G, H and I tile the archive's `G-I`. `G-I` is Eurostat's A10 grouping, which `check_split` does not parse, so the engine accepts the split and says it could not verify the tiling. The grouping is documented by Eurostat as G, H and I; it is read from there rather than derived here.",
+      "applies_to": "whether the parts add up to the parent",
+      "source": "Eurostat, NACE Rev. 2 A*10 aggregation",
+      "validated_by": "read from the classification, not measured",
+      "confidence": "strong",
+      "impact_on_results": "none on the arithmetic — the parts are scaled to the parent's own total either way — but a reader who believed the grouping were G and I alone would be reading transport into the wrong row",
+      "discarded_alternative": null,
+      "discard_reason": null,
+      "created_at": "2026-09-27T12:35:23.245280+00:00"
+    },
+    {
+      "assumption_id": "A-04",
+      "description": "The table is an ESTIMATE, cell by cell: the archive is modelled from the OECD ICIO, Eurostat regional accounts and truck freight flows. Neither of its accounting identities closes, and the residue is carried in a labelled RESIDUAL row and column rather than balanced away. Against ten surveyed regions it records about a quarter of the purchases a region makes from the rest of its country, so the share of an impulse that stays in Catalonia is an upper bound.",
+      "applies_to": "every figure in this run",
+      "source": "Huang, S. & Koutroumpis, P. (2023), European multi regional input output data for 2008-2018, Scientific Data 10, 218",
+      "validated_by": "`run_mrio_real_output.py`, `run_mrio_against_surveys.py`, `run_wide_against_surveys.py`",
+      "confidence": "weak",
+      "impact_on_results": "the split is exact arithmetic on estimated cells; the report sizes the residue and states the bound beside the figures",
+      "discarded_alternative": null,
+      "discard_reason": null,
+      "created_at": "2026-09-27T12:35:23.245281+00:00"
+    }
+  ]
+}
