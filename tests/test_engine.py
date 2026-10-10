@@ -6274,3 +6274,54 @@ def test_the_refusals_a_SATELLITES_sheet_makes():
     refused("a file read back without the column that says what was measured",
             lambda: _read_satellites(lost, ["A", "B"], "t.xlsx"),
             "missing the column(s) origin")
+
+
+def test_the_mixed_model_holds_to_its_source_and_its_two_ends():
+    """M-073: some outputs given, the rest solved for.
+
+    `CORE_085`'s appendix example (Miller and Blair 1985, p. 328): sector 3's
+    output fixed at +150,000. The two routes the paper proves equal -- the mixed
+    model and eq. (4), exogenous rows of A at zero -- must agree, the given
+    output must come back untouched, and the model must collapse onto Leontief
+    with nothing exogenous. `run_mixed_model.py` holds the same on the UK table.
+    """
+    from quadrium.mixed import (MixedModelError, mixed_model,
+                                output_based_inverse)
+
+    A = np.array([[0.15, 0.25, 0.30],
+                  [0.20, 0.05, 0.18],
+                  [0.20, 0.20, 0.10]])
+    r = mixed_model(A, [2], delta_x={2: 150_000.0})
+    check("the mixed model reproduces CORE_085's (A2) to the unit",
+          int(r.x[0]) == 65_346 and int(r.x[1]) == 42_178,
+          f"{r.x[0]:,.2f}, {r.x[1]:,.2f}")
+    check("the exogenous output comes back exactly as given",
+          r.x[2] == 150_000.0)
+    alt = output_based_inverse(A, [2]) @ np.array([0.0, 0.0, 150_000.0])
+    check("eq. (4) gives the same outputs", np.allclose(alt, r.x, atol=1e-8))
+
+    f = np.array([10.0, 20.0, 30.0])
+    check("nothing exogenous is Leontief",
+          np.allclose(mixed_model(A, [], delta_f=f).x,
+                      np.linalg.solve(np.eye(3) - A, f)))
+    mask = np.array([False, True, False])
+    check("a boolean mask names the same sectors as positions",
+          np.allclose(mixed_model(A, mask, delta_x={1: 5.0}).x,
+                      mixed_model(A, [1], delta_x={1: 5.0}).x))
+    jobs = np.array([2.0, 3.0, 4.0])
+    check("an effect is the coefficient times the change in output",
+          np.allclose(r.effect(jobs), jobs * r.x))
+
+    for label, fn in [
+            ("an output change for an endogenous sector",
+             lambda: mixed_model(A, [2], delta_x={0: 1.0})),
+            ("a final demand for an exogenous sector",
+             lambda: mixed_model(A, [2], delta_f={2: 1.0})),
+            ("a non-square matrix",
+             lambda: mixed_model(np.ones((2, 3)), [0]))]:
+        try:
+            fn()
+        except MixedModelError:
+            check(f"refuses {label}", True)
+        else:
+            check(f"refuses {label}", False, "it solved")

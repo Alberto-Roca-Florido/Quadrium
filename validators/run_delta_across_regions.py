@@ -53,6 +53,7 @@ Run:
 """
 from __future__ import annotations
 
+import json
 import math
 import sys
 import warnings
@@ -64,6 +65,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 DATA = ROOT / "data" / "mrio" / "truth" / "Austria"
+RECORD = ROOT / "data" / "_delta_by_region.json"
 REGIONS = ("AT11", "AT12", "AT13", "AT21", "AT22", "AT31", "AT32", "AT33", "AT34")
 FD_OWN = ("57 HOU", "58 INV", "59 GOV", "60 EXPROW", "62 Stocks")
 DELTAS = [round(0.02 * k, 2) for k in range(0, 51)]
@@ -302,6 +304,50 @@ def main() -> int:
           f"median {np.median(err):.3f},")
     print(f"    correlation with the fitted values r = "
           f"{np.corrcoef(pred, d)[0, 1]:+.3f}")
+
+    if "--dump" in sys.argv:
+        # One line per region: what delta came out, under each of the three
+        # criteria, beside the size the published predictor uses and what that
+        # predictor asks for. Written only when asked. Read by
+        # library/tools/paper_figures.py and matched by paper_check.py.
+        import datetime
+        record = {
+            "_note": "Fitted delta region by region against the Austrian "
+                     "survey-based tables, from run_delta_across_regions.py "
+                     "--dump. delta is fitted on first-round multiplier bias "
+                     "(mu1), delta_mu2 on the source's second criterion, "
+                     "delta_mae on mean absolute coefficient error. eq23 is "
+                     "Flegg and Tohmo's equation (23) evaluated with P and I "
+                     "read off the interregional table rather than guessed.",
+            "taken": datetime.date.today().isoformat(),
+            "benchmark": "Rokicki et al. (2021) tables, nine Austrian NUTS-2 regions",
+            "catalonia": {"delta": CATALONIA[1], "share": CATALONIA[0],
+                          "source": "IDESCAT interregional tables, not public"},
+            "published_values": {"Flegg and Tohmo 2013, Finland": 0.25,
+                                 "Bonfiglio and Chelli 2008, simulated": 0.3},
+            "regions": [{"region": r,
+                         "share_pct": round(float(fits[r]["share"]), 4),
+                         "delta": round(float(fits[r]["delta"]), 4),
+                         "delta_mu2": round(float(fits[r]["delta_mu2"]), 4),
+                         "delta_mae": round(float(fits[r]["delta_mae"]), 4),
+                         "eq23": round(float(pred[i]), 4),
+                         "mu1_at_delta": round(float(fits[r]["mu1"]), 4),
+                         "mu1_at_0_25": round(float(fits[r]["mu1_default"]), 4),
+                         "mu1_slq": round(float(fits[r]["mu1_slq"]), 4)}
+                        for i, r in enumerate(REGIONS)],
+            "size_regression": {"r2": round(float(r2), 4),
+                                "r2_without_vienna": round(float(r2_wo), 4),
+                                "predicts_catalonia": round(
+                                    float(intercept + slope * math.log(CATALONIA[0])), 4),
+                                "predicts_catalonia_without_vienna": round(
+                                    float(i2 + s2 * math.log(CATALONIA[0])), 4)},
+            "eq23_out_of_sample": {"mae": round(float(err.mean()), 4),
+                                   "median_ae": round(float(np.median(err)), 4),
+                                   "r": round(float(np.corrcoef(pred, d)[0, 1]), 4)},
+        }
+        RECORD.write_text(json.dumps(record, indent=1) + "\n")
+        print(f"\n    wrote {RECORD.relative_to(ROOT)} — "
+              f"{len(record['regions'])} regions")
 
     check("eq. (23) does not transfer, and the missing survey quantity was not "
           "the reason",

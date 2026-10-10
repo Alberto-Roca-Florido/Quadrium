@@ -12,15 +12,28 @@ quadrium --help
 
 ## See what it produces before installing anything
 
-**[`outputs/uk_food_beverage/report.md`](outputs/uk_food_beverage/report.md)** is
+**[`outputs/uk_food_beverage/report.md`](https://github.com/Alberto-Roca-Florido/Quadrium/blob/main/outputs/uk_food_beverage/report.md)** is
 a finished run, published on purpose: the ONS 2023 analytical table with its
 hospitality sector divided into three, using real ABS turnover for the sizes.
 Verbatim output — the whole folder is there, including the disaggregated table,
 the provenance of every cell and the assumption ledger. Regenerate it with
 `python3 examples/uk_food_beverage.py`.
 
-Read it before deciding whether this is worth installing. That is what it is
-there for.
+**[`outputs/es51_distribution/report.md`](https://github.com/Alberto-Roca-Florido/Quadrium/blob/main/outputs/es51_distribution/report.md)**
+is the second, and it rests on a different kind of table: the European
+multiregional archive loaded as three blocks — Catalonia, the rest of Spain
+and the rest of the archive — with `G-I` divided into trade, transport and
+hospitality on Eurostat's regional business statistics for 2018, the table's
+own year. It answers what a one-region table cannot ask, which is where an
+impulse lands, and it shows what the sizes are made of: at NUTS-2 neither
+turnover nor value added is published, so the closest proxy to output is a
+cost, and the two keys that are published disagree by 7.8 points on
+hospitality. Regenerate it with `python3 examples/es51_distribution.py`,
+which needs the archive's workbook — `data/mrio/README.md` says where it
+comes from.
+
+Read either before deciding whether this is worth installing. That is what they
+are there for.
 
 *One thing you will notice in it.* The report cites its sources by paragraph and
 page — `CORE_012 ¶11.66, pp. 333–334` and the like — and those are published
@@ -51,7 +64,7 @@ pair.
 
 Python ≥ 3.10, `numpy` and `openpyxl`. Nothing else.
 
-**New here?** [`docs/GUIDE.md`](docs/GUIDE.md) takes you from an empty folder to
+**New here?** [`docs/GUIDE.md`](https://github.com/Alberto-Roca-Florido/Quadrium/blob/main/docs/GUIDE.md) takes you from an empty folder to
 a disaggregated, balanced table with an audit trail — including how to bring in
 a table from any statistical office, not just the two whose workbooks are read
 natively. No Python: you fill in a spreadsheet and run one command.
@@ -59,7 +72,7 @@ natively. No Python: you fill in a spreadsheet and run one command.
 ## What makes this different from a matrix library
 
 **Every claim in here is checked against a number somebody else published.**
-A hundred and thirty-six validators run on official data from seven
+A hundred and forty-one validators run on official data from seven
 statistical offices, and they are the documentation: each one states what it
 is testing, cites the paragraph and page it comes from, and prints the
 deviation it measured.
@@ -110,13 +123,13 @@ validators say so on the project's own fixtures.
 ```
 src/quadrium/     the engine: loaders, solvers, transformation, disaggregation,
                   balancing, validation, reporting
-validators/      136 runnable checks against published tables
+validators/      141 runnable checks against published tables
 data/             the tables they run on — see PROVENANCE.md
 docs/             the user guide
-outputs/          one finished run, published so it can be read without
+outputs/          two finished runs, published so they can be read without
                   installing anything
-examples/         four worked pilots
-tests/            75 unit tests
+examples/         five worked pilots
+tests/            76 unit tests
 ```
 
 ## What is not here

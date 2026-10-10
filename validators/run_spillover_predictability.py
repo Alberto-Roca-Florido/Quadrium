@@ -74,6 +74,7 @@ Run:
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import warnings
 from pathlib import Path
@@ -83,6 +84,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 MRIO = ROOT / "data" / "mrio"
+RECORD = ROOT / "data" / "_spillover_predictability.json"
 FAIL: list[str] = []
 
 # Exit code 3, not 0. `check.sh` counts it as SKIPPED rather than as a pass:
@@ -185,10 +187,10 @@ def main() -> int:
             yo[te] = (_pred(_ols(Xc[tr], y[tr]), Xc[te])
                       if tr.sum() > len(cols) + 5 else y[tr].mean())
         r2out = 1 - ((y - yo) ** 2).sum() / ((y - y.mean()) ** 2).sum()
-        return r2in, r2out, float(np.abs(y - yo).mean())
+        return r2in, r2out, float(np.abs(y - yo).mean()), yo
 
-    a_in, a_out, a_mae = score(OBSERVED)
-    b_in, b_out, b_mae = score(EVERYTHING)
+    a_in, a_out, a_mae, a_yo = score(OBSERVED)
+    b_in, b_out, b_mae, b_yo = score(EVERYTHING)
     base = float(np.abs(y - y.mean()).mean())
 
     print()
@@ -263,6 +265,80 @@ def main() -> int:
           f"still not predictable: out-of-sample R² {a4[1]:+.3f}, error "
           f"{a4[2]:.4f} against {base4:.4f} for the mean. With the "
           f"interregional trade, {b4[1]:+.3f}")
+
+    # A referee's objection, answered rather than conceded: model A is linear,
+    # and a flat linear fit is not the same as an unpredictable quantity. The
+    # same predictors are given to a nearest-neighbour rule under the same
+    # leave-one-country-out protocol, which can fit any shape the observables
+    # support and assumes none.
+    def knn_loco(cols, k=10):
+        Xc = F[:, cols]
+        mu, sd = Xc.mean(0), np.where(Xc.std(0) > 0, Xc.std(0), 1.0)
+        Zc = (Xc - mu) / sd
+        yo = np.empty_like(y)
+        for c in np.unique(countries):
+            tr, te = countries != c, countries == c
+            for i in np.where(te)[0]:
+                d2 = ((Zc[tr] - Zc[i]) ** 2).sum(1)
+                yo[i] = y[tr][np.argsort(d2)[:k]].mean()
+        r2 = 1 - ((y - yo) ** 2).sum() / ((y - y.mean()) ** 2).sum()
+        return float(r2), float(np.abs(y - yo).mean())
+
+    knn_r2, knn_mae = knn_loco(OBSERVED)
+    knn_r2_all, knn_mae_all = knn_loco(EVERYTHING)
+    print()
+    print(f"    {'A, ten nearest neighbours instead of OLS':<38}{'—':>12}"
+          f"{knn_r2:>15.3f}{knn_mae:>9.4f}")
+    print(f"    {'B, the same':<38}{'—':>12}{knn_r2_all:>15.3f}{knn_mae_all:>9.4f}")
+    check("part of what the linear model misses is shape, and most of what it "
+          "misses is information",
+          knn_r2 > a_out and (knn_r2_all - knn_r2) > 0.25,
+          f"ten nearest neighbours on the same observables, held out by "
+          f"country, give out-of-sample R² {knn_r2:+.3f} and error "
+          f"{knn_mae:.4f}, against {a_out:+.3f} and {a_mae:.4f} for the linear "
+          f"model and {base:.4f} for answering with the mean. So the quantity "
+          f"is weakly predictable from what the analyst holds, and the earlier "
+          f"reading of this file -- that it was not predictable at all -- was "
+          f"a property of the specification. The gap that carries the argument "
+          f"is the other one: the same rule reaches {knn_r2_all:+.3f} once "
+          f"interregional openness is added, which is "
+          f"{knn_r2_all - knn_r2:+.3f} for a variable the analyst does not have")
+
+    if "--dump" in sys.argv:
+        # Region by region, what the share is and what each model predicted for
+        # it when its whole country was held out. The table in the paper gives
+        # two R² and an error; this is what those three numbers are made of.
+        import datetime
+        kept_regions = [regions[r] for r in keep]
+        record = {
+            "_note": "Leave-one-country-out prediction of the interregional "
+                     "spillover share, from run_spillover_predictability.py "
+                     "--dump. Model A uses only what an analyst regionalising "
+                     "a national table holds: regional output by sector. "
+                     "Model B adds the region's interregional openness, which "
+                     "they do not hold. Each region is predicted by a model "
+                     "fitted without its country.",
+            "taken": datetime.date.today().isoformat(),
+            "n_regions": len(y),
+            "n_countries": int(len(np.unique(countries))),
+            "mean_share": round(float(y.mean()), 4),
+            "scores": {"A_observed": {"r2_in": round(a_in, 4), "r2_out": round(a_out, 4),
+                                      "mae": round(a_mae, 4)},
+                       "B_plus_openness": {"r2_in": round(b_in, 4), "r2_out": round(b_out, 4),
+                                           "mae": round(b_mae, 4)},
+                       "mean_always": {"mae": round(base, 4)},
+                       "A_nearest_neighbours": {"r2_out": round(knn_r2, 4),
+                                                "mae": round(knn_mae, 4)},
+                       "B_nearest_neighbours": {"r2_out": round(knn_r2_all, 4),
+                                                "mae": round(knn_mae_all, 4)}},
+            "regions": [{"region": kept_regions[i], "country": str(countries[i]),
+                         "observed": round(float(y[i]), 5),
+                         "pred_observed_only": round(float(a_yo[i]), 5),
+                         "pred_plus_openness": round(float(b_yo[i]), 5)}
+                        for i in range(len(y))],
+        }
+        RECORD.write_text(json.dumps(record, indent=1) + "\n")
+        print(f"\n    wrote {RECORD.relative_to(ROOT)} — {len(y)} regions")
 
     print("\n" + "=" * 78)
     if FAIL:

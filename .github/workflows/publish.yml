@@ -1,0 +1,71 @@
+# Upload a released version to PyPI. Nothing here runs on its own.
+#
+# WHY `workflow_dispatch` AND NOT `on: release`
+# ----------------------------------------------
+# A version uploaded to PyPI cannot be replaced -- the filename is claimed for
+# good, and a mistake is corrected only by publishing another version. So
+# publishing is a deliberate act and not a side effect of tagging: this runs
+# when somebody starts it, with the tag they name, and never because a release
+# appeared. The owner's account is what authorises the upload; this file only
+# does the carrying.
+#
+# NO TOKENS. PyPI's trusted publishing exchanges a short-lived OIDC token
+# minted by GitHub for this repository and this workflow file, so there is no
+# API token to store, rotate or leak. It requires the project to be registered
+# on PyPI as a pending publisher first, naming owner, repository and the
+# filename of this workflow.
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to build and publish, e.g. v0.2.0"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # What trusted publishing needs, and the only reason this job has any
+      # write permission at all.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      # THE TAG AND THE PACKAGE MUST BE THE SAME VERSION.
+      # Building from a tag says nothing about what `pyproject.toml` holds at
+      # that commit, and the pair that disagrees is the one that cannot be
+      # taken back: 0.2.0 uploaded from a v0.3.0 tag claims the wrong filename
+      # for ever. The tag arrives through the environment rather than being
+      # interpolated into the script, so a tag name cannot become a command.
+      - name: the tag and the version are the same thing
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          version=$(python -c "import tomllib,sys;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "pyproject says $version, the tag says $TAG"
+          test "v$version" = "$TAG"
+
+      - name: build
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      # Printed before the upload, because this is the last moment anything can
+      # be looked at.
+      - name: what is about to be uploaded
+        run: ls -l dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

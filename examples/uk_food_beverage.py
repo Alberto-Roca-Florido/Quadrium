@@ -44,6 +44,10 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
+# Where the run is written. `outputs/uk_food_beverage/` is published verbatim,
+# so the check that regenerates this run to see whether it still produces the
+# same figures must write somewhere else. `run_published_runs.py` sets this.
+OUT = ROOT / "outputs"
 sys.path.insert(0, str(ROOT / "src"))
 
 from quadrium.io_loader import load_uk_analytical_iot  # noqa: E402
@@ -320,7 +324,7 @@ def main() -> int:
         splits=[SplitSpec(SECTOR, NEW_CODES, NEW_LABELS)],
         scenarios=build_scenarios(), keys=build_keys(), ledger=ledger,
         title=f"UK {SECTOR} — {table.sector_labels[p]} — sector split",
-        source_file=ROOT / "UK_IOAT_2023_domestic_ixi.xlsx", root=ROOT / "outputs",
+        source_file=ROOT / "UK_IOAT_2023_domestic_ixi.xlsx", root=OUT,
         preamble="> **Sizes are real; structures are the parent's.** The table "
                  "is the ONS 2023 analytical IOT and the size split uses real "
                  "ABS turnover for SIC 56.1/56.2/56.3. Deliberately, "

@@ -27,6 +27,10 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+# Where the run is written. A check that runs this example to see whether it
+# still works must not write over whatever is in `outputs/`; `run_examples.py`
+# points this at a temporary folder, and nothing else does.
+OUT = ROOT / "outputs"
 
 from quadrium.io_loader import load_uk_analytical_iot  # noqa: E402
 from quadrium.models import (AllocationKey, Assumption,  # noqa: E402
@@ -141,7 +145,7 @@ def main() -> int:
         ],
         keys=build_keys(), ledger=ledger,
         title="UK hospitality — two sectors divided in one run",
-        source_file=ROOT / "UK_IOAT_2023_domestic_ixi.xlsx", root=ROOT / "outputs",
+        source_file=ROOT / "UK_IOAT_2023_domestic_ixi.xlsx", root=OUT,
         preamble="> **Illustrative proxies and profiles.** The ONS table is "
                  "real; the split is not. See the assumption ledger.")
     project.run().write()

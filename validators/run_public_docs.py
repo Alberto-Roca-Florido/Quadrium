@@ -237,11 +237,17 @@ def main() -> int:
           "outputs/ holds no run with a report.md. The owner asked to see what "
           "a user would see before installing, and nothing here answers that")
     if published:
-        named = [p.name for p in published if p.name in rt or p.name in gt]
-        check("and it is linked from a document, not merely present",
-              bool(named),
-              f"{', '.join(named)} is named in the README or the guide — a "
-              f"folder nobody mentions is a folder nobody finds")
+        # ONE RUN AT A TIME, NOT "AT LEAST ONE".
+        # This check used to pass if ANY published run was named in a document,
+        # which was the same thing as checking the first one for as long as
+        # there was only one. A second run arrived on 2026-10-01 and the check
+        # would have stayed green with it mentioned nowhere.
+        for run in published:
+            linked = run.name in rt or run.name in gt
+            check(f"and {run.name} is linked from a document, not merely "
+                  f"present", linked,
+                  "named in the README or the guide" if linked else
+                  "a folder nobody mentions is a folder nobody finds")
 
         # A PUBLISHED RUN NEEDS A PAGE THAT SAYS WHAT IT WAS.
         # `report.md` is the engine's verbatim output, which is the right thing
@@ -269,8 +275,17 @@ def main() -> int:
             # This file exists because counts rot when nothing counts them.
             # A narration quoting figures from a report that has since been
             # regenerated is the same failure in a more persuasive form.
-            quoted = set(re.findall(r"\b\d{1,3}(?:,\d{3})+\.\d\b|\b1\.\d{3}\b",
-                                    page.read_text()))
+            # EVERY FIGURE, NOT THE TWO SHAPES THE FIRST PAGE HAPPENED TO
+            # QUOTE. The pattern was written for thousands-separated values and
+            # multipliers, which is what uk_food_beverage's page holds. The
+            # second page is mostly percentages, and a first draft of it quoted
+            # seven that were nowhere in its report -- caught by hand, which is
+            # not a check. Shares, counts and years are now read too: anything
+            # with a decimal point or a separator, and any integer of two
+            # digits or more. Single digits are left out as prose, not figures.
+            quoted = set(re.findall(
+                r"\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b|\b\d+\.\d+\b"
+                r"|\b\d{2,}\b", page.read_text()))
             missing = sorted(q for q in quoted if q not in report)
             check(f"and every figure {run.name}'s page quotes is in the report "
                   f"it narrates",

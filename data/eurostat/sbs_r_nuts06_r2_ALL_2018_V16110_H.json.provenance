@@ -1,0 +1,10 @@
+{
+  "dataset": "sbs_r_nuts06_r2",
+  "url": "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/sbs_r_nuts06_r2?format=JSON&lang=EN&time=2018&indic_sb=V16110&nace_r2=H",
+  "geo": null,
+  "year": 2018,
+  "bytes": 29805,
+  "sha256": "f6a09170a1b2bd64eb7fddd886abcb498cbb12989aa6c9f6cd865258ccddb7e7",
+  "retrieved_at": "2026-10-10T07:02:35.011147+00:00",
+  "n_values": 432
+}

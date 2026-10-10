@@ -1,9 +1,19 @@
 # Everything in this repository, on the oldest Python it claims to support and
-# the newest one that exists.
+# the newest ones that exist.
 #
 # `requires-python = ">=3.10"` is a promise, and a promise nothing tests is a
-# guess. 3.10 is the floor; the latest is there to catch a deprecation before a
+# guess. 3.10 is the floor; the newest are there to catch a deprecation before a
 # user does.
+#
+# NOTHING IN THE SUITE CAN CHECK THAT THIS LIST IS STILL THE NEWEST.
+# The validators are offline by design, and which Python exists is a fact about
+# the world on the day you ask. So this drifts, and it did: it said 3.13 while
+# 3.14 had been out for a year. It is checked by hand when a release is cut --
+# against the runner's own manifest, which is the list of what CI can install:
+#     gh api repos/actions/python-versions/contents/versions-manifest.json
+# Last checked 2026-10-10: 3.10, 3.13 and 3.14 all build for linux-22.04,
+# linux-24.04 and linux-26.04, which is the image `ubuntu-latest` moves to on
+# 2026-10-19.
 name: checks
 
 on:
@@ -40,12 +50,24 @@ jobs:
             pins: "numpy==1.24.* openpyxl==3.1.*"
           - python: "3.10"
             pins: ""
+          # What most users have, and the newest that exists. Both, during a
+          # transition: a break under 3.14 that 3.13 does not show is the
+          # deprecation this file is here to find, and telling the two apart
+          # needs both rows.
           - python: "3.13"
             pins: ""
+          - python: "3.14"
+            pins: ""
     steps:
-      - uses: actions/checkout@v4
+      # v7 is node 24. The one breaking change it carries -- a fork's PR is no
+      # longer checked out for `pull_request_target` or `workflow_run` -- does
+      # not reach this workflow, which triggers on push, pull_request, dispatch
+      # and schedule. No inputs are passed, so there is nothing else to break.
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      # v7 is node 24 too. It removed the `pip-install` input; this passes
+      # `python-version` and `cache`, both of which it still takes.
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip

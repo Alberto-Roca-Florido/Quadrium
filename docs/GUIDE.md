@@ -211,17 +211,26 @@ illustrative, and the report says so at the top and in the assumption ledger.
 It exists so you can see the shape of a result before you commit real data to
 it.
 
-**And if you would rather read a result than run one**, one finished run is
-published in this repository. Start with
-`outputs/uk_food_beverage/README.md`, which says what was asked, what the
-engine was given and what came out — then `report.md` beside it is the verbatim
-output. Neither needs anything installed.
+**And if you would rather read a result than run one**, two finished runs are
+published in this repository. Each starts with a `README.md` saying what was
+asked, what the engine was given and what came out; `report.md` beside it is the
+verbatim output. Neither needs anything installed.
 
-It is worth reading even if you never run this: the three subsectors come out
-with **identical multipliers**, and the page explains why that is a statement of
-what was not attempted rather than a result.
+`outputs/uk_food_beverage/` is the ONS 2023 table with its hospitality sector
+divided into three on real business-survey turnover. It is worth reading even if
+you never run this: the three subsectors come out with **identical
+multipliers**, and the page explains why that is a statement of what was not
+attempted rather than a result.
 
-**Four more, in `examples/`.** They are Python rather than a workbook, which
+`outputs/es51_distribution/` divides Catalonia's `G-I` into trade, transport and
+hospitality on a table that holds three blocks — the region, the rest of its
+country and the rest of the archive — so it can say where an impulse lands and
+not only how large it is. Read it for what the sizes are made of: at NUTS-2 the
+statistical office publishes neither turnover nor value added, so the closest
+proxy to output is a cost, and the two keys it does publish disagree by **7.8
+points** on hospitality.
+
+**Five more, in `examples/`.** They are Python rather than a workbook, which
 makes them worth reading for a different reason: each one says in its docstring
 what is real in it and what is illustrative.
 
@@ -231,6 +240,7 @@ what is real in it and what is illustrative.
 | `examples/uk_hospitality.py` | the real UK table, invented proxies and profiles |
 | `examples/uk_food_beverage.py` | real table AND a real split, from ONS business survey turnover — this is the one published above |
 | `examples/es_hosteleria.py` | the Spanish table, split from the source table's own finer detail rather than a proxy |
+| `examples/es51_distribution.py` | a region of the European multiregional archive, with Eurostat's regional business statistics for the sizes at the table's own year — this is the second one published above |
 
 ```bash
 python3 examples/synthetic_accommodation.py
@@ -1071,6 +1081,44 @@ contain the answer it spans a median **28 points of share**. It is honest about
 being uncertain and says almost nothing about where the answer is. A narrow
 range is not a safer one: the splits where it misses are the wider ones. Treat
 it as evidence that you do not know, not as an interval you can quote.
+
+**And at regional level there is no choice to get right, only one to make.**
+Everything above is measured on splits where the office publishes the answer,
+which is a national luxury. At NUTS-2 Eurostat publishes neither turnover nor
+value added for trade, transport and hospitality, so the closest proxy to
+output is a cost — and the two keys it does publish, the wage bill and persons
+employed, give a different split in **every region it covers**. Across the 278
+regions carrying both, the worse of the three sections moves a median **8.8
+points** of share (p10 3.4, p90 14.6, worst 26.1), and exactly one region is
+inside a single point. Hospitality is what they disagree about most, in 150 of
+the 278. The published run for Catalonia moves 7.9 points, the 42nd percentile,
+so that run is an ordinary case rather than a cautionary one — which is the
+only reason it is worth learning from
+(`validators/run_key_disagreement.py`).
+
+**Whether your region can take either key is a separate question**, and it is
+answered by codes rather than by data. Both keys reach **231 of the archive's
+268 regions with data**. Of the 37 they do not reach, eight are Romania, where
+Eurostat publishes nothing for these sections; the other 29 are a
+classification vintage — the archive codes France and Poland in an older NUTS
+than this dataset and Croatia in a newer one, and the key lookup matches codes
+literally. France is the one that stings: **one** of its twenty-two regions
+matches.
+
+That last part is a gap in the plumbing rather than in the data. Eurostat's own
+correspondence tables are already in this repository, with their provenance,
+and `validators/run_mrio_nuts_join.py` composes them to resolve 36 of the
+archive's region codes — 26 from NUTS 2013 to 2016, 9 from 2010 to 2013, one
+(PL12) left unresolved rather than guessed. Nobody has yet pointed that
+machinery at the proxy key, which is why the figure above is 231 and not
+higher.
+
+Matching by code is also where the archive's own mislabelling stops being
+untidy and becomes dangerous. Of the eighteen labels the loader corrects
+(`MRIO_RELABEL`), **eight name a region Eurostat also publishes** — EL30 to
+EL43, whose rows belong to EL62 to EL65, and the four Finnish codes the deposit
+shifts by one. Reading those as printed would not fail. It would hand another
+region's wage bill to the split and produce a result that looks fine.
 
 **Before any of that, check whether the answer is already published for another
 year.** If your office publishes the split you need for a nearby year, use that

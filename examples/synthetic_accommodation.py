@@ -25,7 +25,12 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+# Where the run is written. A check that runs this example to see whether it
+# still works must not write over whatever is in `outputs/`; `run_examples.py`
+# points this at a temporary folder, and nothing else does.
+OUT = ROOT / "outputs"
 
 from quadrium.models import (AllocationKey, Assumption, AssumptionLedger,
                               IOTable, ProxyStrength, Scenario, SplitSpec)
@@ -155,7 +160,7 @@ def main() -> int:
         splits=[SplitSpec("ACC", new_codes, new_labels)],
         scenarios=scenarios, keys=keys, ledger=ledger,
         title="Accommodation & food services — sector split",
-        root=Path(__file__).resolve().parents[1] / "outputs")
+        root=OUT)
     project.run().write()
 
     print(f"Original table: {table.n} sectors, "

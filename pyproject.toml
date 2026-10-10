@@ -16,10 +16,25 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
+  # Only the versions CI has actually run green. 3.14 was added to the matrix
+  # on 2026-10-10 and goes here after its first pass, not before: a classifier
+  # is a promise about what works, and this project does not make those from
+  # the fact that something ought to.
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 dependencies = ["numpy>=1.24", "openpyxl>=3.1"]
+# Without these the PyPI page carries no link at all -- not to the repository,
+# not to the guide, not to the archived version a citation should point at.
+[project.urls]
+Repository = "https://github.com/Alberto-Roca-Florido/Quadrium"
+Documentation = "https://github.com/Alberto-Roca-Florido/Quadrium/blob/main/docs/GUIDE.md"
+Provenance = "https://github.com/Alberto-Roca-Florido/Quadrium/blob/main/PROVENANCE.md"
+Archive = "https://doi.org/10.5281/zenodo.22345637"
 
 [project.optional-dependencies]
 pdf = ["pymupdf>=1.23"]

@@ -66,6 +66,7 @@ Run:
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import warnings
 from pathlib import Path
@@ -75,6 +76,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 MRIO = ROOT / "data" / "mrio"
+RECORD = ROOT / "data" / "_spillover_distribution.json"
 FAIL: list[str] = []
 
 # Exit code 3, not 0. `check.sh` counts it as SKIPPED rather than as a pass:
@@ -224,6 +226,94 @@ def main() -> int:
           top[0] in ("K", "M_N", "J") and by_sector["B-E"] < 0.12,
           "; ".join(f"{s} {100 * by_sector[s]:.1f} %" for s in top[:3])
           + f"; industry B-E lowest at {100 * by_sector['B-E']:.1f} %")
+
+    if "--dump" in sys.argv:
+        # The distribution itself, not a summary of it. Written only when asked,
+        # because a validator that rewrites a tracked file on every run makes
+        # every run a change. What reads it: library/tools/paper_figures.py for
+        # the figures of §4.2, and paper_check.py, which matches the figures
+        # printed above against this record rather than against the plot.
+        import datetime
+        unit_region = np.repeat(np.array(regions), S)
+        unit_sector = np.array(sectors * R)
+        kept = np.where(keep)[0]
+        by_country: dict[str, list[float]] = {}
+        for i in kept:
+            by_country.setdefault(unit_region[i][:2], []).append(float(share[i]))
+        record = {
+            "_note": "Interregional spillover share of the Type I output "
+                     "multiplier, one entry per region-sector unit, from "
+                     "run_mrio_spillovers.py --dump on the 2018 block of the "
+                     "Huang and Koutroumpis archive. Islands (Appendix A.2) "
+                     "are excluded. The share is (m - intra) / m, with m the "
+                     "column sum of the Leontief inverse and intra the part of "
+                     "that sum lying in the unit's own region.",
+            "taken": datetime.date.today().isoformat(),
+            "n_units": int(keep.sum()),
+            "n_regions": int((~island).sum()),
+            "excluded_islands": n_isl,
+            "quantiles": {f"p{q}": float(np.percentile(sh, q))
+                          for q in (1, 10, 25, 50, 75, 90, 99)},
+            "max": float(sh.max()),
+            "mean": float(sh.mean()),
+            "medians": {"multiplier": float(np.median(m[keep])),
+                        "intraregional": float(np.median(intra[keep])),
+                        "omitted": float(np.median((m - intra)[keep]))},
+            "by_sector": {s: float(v) for s, v in by_sector.items()},
+            "variance": {
+                # How much of the spread is between countries and how much
+                # inside them. If almost all of it were between countries, a
+                # practitioner could at least use their country's own median;
+                # the point of §5.2 is that they cannot.
+                "between_country_share": float(
+                    sum(len(v) * (np.mean(v) - sh.mean()) ** 2
+                        for v in by_country.values())
+                    / float(((sh - sh.mean()) ** 2).sum())),
+                "country_median_min": float(min(np.median(v) for v in by_country.values())),
+                "country_median_max": float(max(np.median(v) for v in by_country.values())),
+                "mean_within_country_p10_p90": float(np.mean(
+                    [np.percentile(v, 90) - np.percentile(v, 10)
+                     for v in by_country.values() if len(v) >= 20])),
+            },
+            "without_uk": {
+                # The 33 British regions have a median share of 1.3 %, which no
+                # reading of that economy supports and which A.4's home bias
+                # does: they are kept in the headline and the headline is also
+                # reported without them, because a spread carried by a defect
+                # is not a finding.
+                "n": int(sum(1 for i in kept if not str(unit_region[i]).startswith("UK"))),
+                **{f"p{q}": float(np.percentile(
+                    [float(share[i]) for i in kept
+                     if not str(unit_region[i]).startswith("UK")], q))
+                   for q in (10, 50, 90)},
+            },
+            "by_country": {c: {"n": len(v),
+                               "p10": float(np.percentile(v, 10)),
+                               "p50": float(np.median(v)),
+                               "p90": float(np.percentile(v, 90))}
+                           for c, v in sorted(by_country.items())},
+            "units": [{"region": str(unit_region[i]), "sector": str(unit_sector[i]),
+                       "share": round(float(share[i]), 6),
+                       "multiplier": round(float(m[i]), 4)} for i in kept],
+        }
+        RECORD.write_text(json.dumps(record, indent=1) + "\n")
+        print(f"\n    wrote {RECORD.relative_to(ROOT)} — {len(record['units']):,} "
+              f"units, {record['n_regions']} regions, "
+              f"{len(record['by_country'])} countries")
+
+    uk = np.array([share[i] for i in np.where(keep)[0]
+                   if not np.repeat(np.array(regions), S)[i].startswith("UK")])
+    check("the spread is not carried by the one country whose figures are not "
+          "credible",
+          float(np.percentile(uk, 90) / np.percentile(uk, 10)) > 5,
+          f"without the 33 British regions, whose median of "
+          f"{100 * np.median([share[i] for i in np.where(keep)[0] if np.repeat(np.array(regions), S)[i].startswith('UK')]):.1f} % "
+          f"is the home bias of A.4 at its worst rather than an economy: "
+          f"p10 {100 * np.percentile(uk, 10):.1f} %, median "
+          f"{100 * np.median(uk):.1f} %, p90 {100 * np.percentile(uk, 90):.1f} %, "
+          f"a ratio of {np.percentile(uk, 90) / np.percentile(uk, 10):.1f} against "
+          f"{np.percentile(sh, 90) / np.percentile(sh, 10):.1f} with them. The "
+          f"factor of twenty is partly theirs; an order of magnitude is not")
 
     print("\n" + "=" * 78)
     if FAIL:

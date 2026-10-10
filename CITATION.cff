@@ -6,20 +6,27 @@ authors:
   - family-names: "Roca-Florido"
     given-names: "Alberto"
     orcid: "https://orcid.org/0000-0002-0159-6032"
-repository-code: "https://github.com/Albertuken/Quadrium"
+repository-code: "https://github.com/Alberto-Roca-Florido/Quadrium"
 license: MIT
 version: 0.2.0
-date-released: 2026-09-14
-# The concept DOI. It always resolves to the latest version, which is what
-# a citation of the software should point at. The DOI of THIS version is
-# assigned by Zenodo when the release is published and added here then; the
-# entry that stood below was v0.1.0's (10.5281/zenodo.22345638), and a version
-# bump must not relabel an earlier version's DOI as its own.
+date-released: 2026-10-10
+# The concept DOI stays here, because it always resolves to the latest version
+# and that is what a citation of the software should point at. The DOI of THIS
+# version sits below it as a second identifier, assigned by Zenodo on
+# 2026-10-10 when the release was published.
+#
+# What must not happen, and nearly did: the entry that stood here before the
+# bump was v0.1.0's (10.5281/zenodo.22345638). Leaving it would have relabelled
+# an earlier version's DOI as this one's, and a Zenodo record cannot be
+# corrected afterwards.
 doi: 10.5281/zenodo.22345637
 identifiers:
   - type: doi
     value: 10.5281/zenodo.22345637
     description: "Concept DOI — resolves to the latest version"
+  - type: doi
+    value: 10.5281/zenodo.23283923
+    description: "Version DOI — this version, 0.2.0, archived 2026-10-10"
 abstract: >-
   An engine for building and manipulating supply-use and input-output systems:
   loading published tables from statistical offices, disaggregating sectors

@@ -75,6 +75,10 @@ from quadrium.models import (AllocationKey, Assumption,  # noqa: E402
                               ProxyStrength, Scenario, SplitSpec)
 from quadrium.project import IOProject  # noqa: E402
 
+# Where the run is written. A check that runs this example to see whether it
+# still works must not write over whatever is in `outputs/`; `run_examples.py`
+# points this at a temporary folder, and nothing else does.
+OUT = ROOT / "outputs"
 TABLE = ROOT / "data" / "ine" / "cne_tio_22.xlsx"
 NEW = ["36A", "36B"]
 LBL = ["Servicios de alojamiento (CNAE 55)",
@@ -410,7 +414,7 @@ def main() -> int:
         ],
         keys=keys, ledger=build_ledger(),
         title="Hostelería española — alojamiento frente a comidas y bebidas",
-        source_file=TABLE, root=ROOT / "outputs",
+        source_file=TABLE, root=OUT,
         preamble="> **Los pesos son datos observados**, de la Estadística "
                  "Estructural de Empresas del INE para el mismo año que la "
                  "tabla. Lo que no es observado es que una encuesta de "
