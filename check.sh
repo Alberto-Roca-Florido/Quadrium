@@ -155,6 +155,7 @@ LOGS=$(mktemp -d)
 trap 'rm -rf "$LOGS"' EXIT
 FAILED=()
 SKIPPED=()
+COVERAGE=()
 COUNT=0
 START=$(date +%s)
 
@@ -181,6 +182,18 @@ for v in "$VDIR"/*.py; do
         3) printf 's'; SKIPPED+=("$name") ;;
         *) printf 'F'; FAILED+=("$name") ;;
     esac
+    # A validator that knows its own denominator prints it on a line beginning
+    # `coverage:`. Collected whatever the exit code, because the case the rule
+    # exists for is a validator that PASSED over a small denominator. The
+    # pattern is deliberately narrow -- anchored, with the colon -- because
+    # several validators use the word in prose and in per-row detail, and a
+    # loose grep would fill this section with noise, which would be a worse
+    # version of the problem it is meant to fix.
+    cov=$(grep -E '^[[:space:]]*coverage[[:space:]]*:' "$LOGS/$name.log" \
+          | head -1 | sed -E 's/^[[:space:]]*coverage[[:space:]]*:[[:space:]]*//')
+    if [ -n "$cov" ]; then
+        COVERAGE+=("$name|$cov")
+    fi
 done
 echo
 ELAPSED=$(( $(date +%s) - START ))
@@ -196,6 +209,24 @@ if [ ${#SKIPPED[@]} -ne 0 ]; then
     for name in "${SKIPPED[@]}"; do
         why=$(sed -n 's/^Nothing was checked: //p' "$LOGS/$name.log" | tail -1)
         printf '    %-32s %s\n' "$name" "$why"
+    done
+    echo
+fi
+
+# A clean run over a small denominator reads as a guarantee -- the rule is in
+# CLAUDE.md and it is there because `check_citations.py` reported 100 % while
+# checking 37 of 381 citations, twice, at two different levels. The validators
+# that know their denominator print it. Until 2026-10-23 this runner captured
+# that line into a log and showed a dot instead, so the suite's own green said
+# nothing about how much was measured: the project's rule, broken by the
+# project's runner.
+if [ ${#COVERAGE[@]} -ne 0 ]; then
+    echo "${#COVERAGE[@]} of $COUNT validator(s) publish a denominator on a \`coverage:\` line."
+    echo "The rest print none THERE. Some measure coverage and report it elsewhere in their"
+    echo "own output -- run_key_spread.py prints it inside an indented table -- so this count"
+    echo "is of the convention, not of what the suite measures:"
+    for entry in "${COVERAGE[@]}"; do
+        printf '    %-32s %s\n' "${entry%%|*}" "${entry#*|}"
     done
     echo
 fi
