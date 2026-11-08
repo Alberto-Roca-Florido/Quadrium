@@ -63,6 +63,40 @@ WONT_DO = (
 )
 
 
+_UNITS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+          "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+          "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+          "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+          "nineteen": 19}
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+         "seventy": 70, "eighty": 80, "ninety": 90}
+
+
+def _from_words(text: str) -> int | None:
+    """English number words to an int, 0-999, or None if it is not one.
+
+    Enough for a count of validators, which is what it reads. Both hyphens
+    occur in practice -- the README has carried `forty-one` with the ASCII
+    one and `Sixty\u2011seven` with the non-breaking one -- so both split.
+    `a` and `and` are dropped: "A hundred and forty-one" is 141.
+    """
+    parts = [w for w in re.split(r"[\s\-\u2011]+", text.strip().lower())
+             if w and w not in ("a", "and")]
+    if not parts:
+        return None
+    total = 0
+    for w in parts:
+        if w in _UNITS:
+            total += _UNITS[w]
+        elif w in _TENS:
+            total += _TENS[w]
+        elif w == "hundred":
+            total = (total or 1) * 100
+        else:
+            return None
+    return total
+
+
 def check(name: str, ok: bool, detail: str = "") -> None:
     print(f"  {'ok  ' if ok else 'FAIL'} {name}" + (f" — {detail}" if detail else ""))
     if not ok:
@@ -176,12 +210,30 @@ def main() -> int:
           f"says {said!r}, examples/ holds {actual}")
 
     # ---- prose counts, which drift separately from the layout block
-    for pat, actual, what in ((r"Sixty-seven|Sixty‑seven", n_val, "validators"),):
-        stale = re.search(pat, rt)
-        check(f"and no spelled-out count of {what} contradicts it",
-              stale is None,
-              f"found {stale.group(0)!r} in the prose while the tree has "
-              f"{actual}" if stale else "none in the prose")
+    #
+    # THIS CHECK USED TO BE A GREP FOR ONE OBSOLETE PHRASE. It looked for the
+    # literal `Sixty-seven`, which is the number the README carried when the
+    # docstring above was written and the tree held 94. That spelling has not
+    # appeared in the README for over a year, so the check passed on every run
+    # while the prose went stale again underneath it: on 2026-11-08 the README
+    # opened with "A hundred and forty-one validators" against a tree of 145,
+    # two lines above the digit form that IS audited and that failed.
+    #
+    # A check that hunts for last year's wrong answer cannot see this year's.
+    # It now READS the number the prose states and compares it, and it FAILS
+    # when the sentence is missing rather than passing on not finding it --
+    # a check that cannot locate its object and reports success is the vacuous
+    # pass this suite exists to refuse.
+    m = re.search(r"([A-Za-z\u2011\- ]+?)\s+validators run on official data",
+                  rt)
+    said = _from_words(m.group(1)) if m else None
+    check("and the count the README's own prose states is the tree's too",
+          said == n_val,
+          f"the prose says {m.group(1).strip()!r} = {said}, the tree has "
+          f"{n_val}" if m else
+          "the sentence 'N validators run on official data' is GONE from the "
+          "README — it is the opening claim, and this check cannot audit a "
+          "number that is not there")
 
     # ---- every option the command line offers is in the guide
     print()
