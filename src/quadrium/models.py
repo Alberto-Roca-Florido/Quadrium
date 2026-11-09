@@ -125,6 +125,149 @@ def _utcnow() -> datetime:
 
 
 # ---------------------------------------------------------------------------
+# 2.1a TradeBlock
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TradeBlock:
+    """Which part of a table is trade, declared by the loader that built it.
+
+    A commodity balance needs three vectors an `IOTable` does not name:
+    exports by product, imports by product, and final use EXCLUDING exports.
+    The table carries `Y` and `Y_labels` and nothing that says which column is
+    which, so until 2026-11-08 the only code that knew was two validators with
+    the column numbers written in by hand, one set per country.
+
+    WHY THE LOADER DECLARES THIS RATHER THAN ANYTHING INFERRING IT
+
+    Two inferences were considered and both fail in the direction that hides
+    the failure:
+
+    - A fixed table of column indices per loader is wrong for Eurostat, which
+      chooses its final-demand columns AT RUN TIME (`eurostat.py`
+      `_FD_ALTERNATIVES`) because a country publishes whichever it publishes --
+      Spain gives P52 and P53 separately in one table and only the combined
+      P5M in another. A static index is right for some countries and silently
+      wrong for others.
+    - Matching `Y_labels` is a guess per country: Eurostat's are ESA codes,
+      the INE's are Spanish prose read off a sheet row, IDESCAT's are Catalan.
+      A matcher FAILS OPEN -- a column it does not recognise stays in domestic
+      final use and inflates it, which is exactly the kind of wrong answer
+      nothing downstream can catch.
+
+    So the declaration is made where the knowledge is: in the loader, in the
+    same expression that selected the export columns and built the imports
+    one. `None` on an `IOTable` means NOT SPECIFIED -- that nobody wrote it
+    down -- and `trade_vectors()` refuses rather than guessing.
+
+    THE TWO SHAPES IMPORTS COME IN
+
+    `imports_column` is for a table that carries imports as a DERIVED and
+    NEGATIVE column of `Y`, which is how `load_ine_tio(variant="total")`
+    builds it. `imports_vector` is for imports that came from somewhere else
+    entirely and are positive, which is how the Catalan workbook publishes
+    them -- rows of its own supply identity, outside `Z`. Exactly one of the
+    two, or neither when the table's imports are a `VA` row and so are by
+    purchasing industry rather than by product, which is a different quantity
+    and not a substitute.
+
+    `indirect_allocation` says whether imports are distributed across the
+    intermediate matrix (a total-flow table) or kept out of it (a domestic
+    one). It is a property of the file and the variant, and `charm.py` states
+    that it cannot be detected from an array. It is NOT a user setting: see
+    the note on the field.
+    """
+    export_columns: list[int]
+    domestic_columns: list[int]
+    indirect_allocation: bool
+    declared_by: str               # one sentence: which sheet or codes this
+                                   # was read off, so a reader can check it
+    imports_column: Optional[int] = None
+    imports_vector: Optional[np.ndarray] = None
+
+    # COLUMNS THAT ARE NEITHER, named so the partition can be total.
+    #
+    # A statistical discrepancy is the case this exists for: `load_ine_tio`
+    # can append a RESIDUAL column to close the row identity, and the INE does
+    # not publish it. Summing it into `domestic_columns` would relabel a
+    # residual as final use, which this project's data-status rule forbids
+    # outright -- so it is named here instead, left out of `D`, and the
+    # imbalance it causes surfaces as the commodity balance's own flag rather
+    # than being buried in a vector that then looks right.
+    other_columns: list[int] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.export_columns = [int(c) for c in self.export_columns]
+        self.domestic_columns = [int(c) for c in self.domestic_columns]
+        self.other_columns = [int(c) for c in self.other_columns]
+        if not str(self.declared_by).strip():
+            raise ValueError(
+                "a TradeBlock must say where it was read from. The whole "
+                "point of declaring this rather than inferring it is that a "
+                "reader can check the declaration against the source, and "
+                "`declared_by` is the only place that is written down.")
+        for name, cols in (("export_columns", self.export_columns),
+                           ("domestic_columns", self.domestic_columns),
+                           ("other_columns", self.other_columns)):
+            if any(c < 0 for c in cols):
+                raise ValueError(f"{name} carries a negative index: {cols}")
+            if len(set(cols)) != len(cols):
+                raise ValueError(
+                    f"{name} names the same column twice: {cols}. A column "
+                    f"counted twice is counted twice in the total.")
+        both = (set(self.export_columns) & set(self.domestic_columns)) | \
+               (set(self.other_columns) &
+                (set(self.export_columns) | set(self.domestic_columns)))
+        if both:
+            raise ValueError(
+                f"column(s) {sorted(both)} are declared BOTH export and "
+                f"domestic final use. Exports are what leaves the economy and "
+                f"domestic final use is what does not; a column cannot be "
+                f"both, and summing it into each double-counts it.")
+        if self.imports_column is not None and self.imports_vector is not None:
+            raise ValueError(
+                "a TradeBlock carries imports either as a column of Y or as a "
+                "vector from elsewhere, not both. Two sources for one "
+                "quantity is two answers with nothing to choose between them.")
+        if self.imports_column is not None:
+            self.imports_column = int(self.imports_column)
+            if self.imports_column < 0:
+                raise ValueError(
+                    f"imports_column is {self.imports_column}")
+            if self.imports_column in set(self.export_columns) | \
+                    set(self.domestic_columns) | set(self.other_columns):
+                raise ValueError(
+                    f"column {self.imports_column} is declared as imports AND "
+                    f"as final use. Imports enter the commodity balance with "
+                    f"the opposite sign to final use, so one column in both "
+                    f"places does not double-count: it cancels.")
+        if self.imports_vector is not None:
+            self.imports_vector = np.asarray(self.imports_vector,
+                                             float).ravel()
+            bad = np.where(self.imports_vector < 0)[0]
+            if bad.size:
+                raise ValueError(
+                    f"imports_vector is negative at index {int(bad[0])} "
+                    f"({self.imports_vector[bad[0]]:.6g}). This field holds "
+                    f"imports as a POSITIVE quantity; a table that carries "
+                    f"them as a negative column of Y declares "
+                    f"`imports_column` instead, and sign is the only thing "
+                    f"that tells the two apart.")
+            if not np.isfinite(self.imports_vector).all():
+                raise ValueError("imports_vector is not finite")
+
+    @property
+    def has_imports(self) -> bool:
+        """Whether this table says anything about imports BY PRODUCT.
+
+        False is a real answer and not a gap to fill with zero: a table whose
+        imports are a value-added row knows them by purchasing industry, which
+        is a different quantity.
+        """
+        return self.imports_column is not None or \
+            self.imports_vector is not None
+
+# ---------------------------------------------------------------------------
 # 2.1 IOTable
 # ---------------------------------------------------------------------------
 
@@ -232,6 +375,17 @@ class IOTable:
     # describes. `run_table_composition.py` makes each construction say so.
     interregional: dict = field(default_factory=dict)
 
+    # WHICH PART OF THIS TABLE IS TRADE, when the loader that built it says.
+    #
+    # `None` means NOT SPECIFIED -- nobody wrote it down -- and the accessors
+    # refuse rather than guess. See `TradeBlock` for why this is declared and
+    # not inferred, and why `indirect_allocation` lives in here rather than
+    # being something a user can assert: the first analyst to write
+    # `indirect_allocation: yes` over a domestic table would get a plausible
+    # wrong answer with no error, and a declaration that can be overridden is
+    # not a declaration.
+    trade: Optional["TradeBlock"] = None
+
     def __post_init__(self) -> None:
         self.Z = np.asarray(self.Z, float)
         self.Y = np.asarray(self.Y, float)
@@ -315,6 +469,110 @@ class IOTable:
             # would refuse a divided table that is perfectly well formed.
             #
             # The run check above is what `block()` needs, and it stays.
+
+        if self.trade is not None:
+            self._check_trade()
+
+    # -- the trade declaration, checked against THIS table's Y ---------------
+
+    def _check_trade(self) -> None:
+        """That the declaration partitions Y, and that imports have the sign
+        the field they are in means.
+
+        The partition is the invariant that matters. A loader that gains a
+        final-demand column and does not classify it would otherwise leave it
+        out of domestic final use silently, and a commodity balance short by a
+        whole column of final demand still looks like a commodity balance.
+        Refusing to construct is the only moment at which anything can tell.
+        """
+        tb = self.trade
+        k = self.Y.shape[1]
+        n = len(self.sector_codes)
+        named = sorted(set(tb.export_columns) | set(tb.domestic_columns) |
+                       set(tb.other_columns) |
+                       ({tb.imports_column}
+                        if tb.imports_column is not None else set()))
+        if named and named[-1] >= k:
+            raise ValueError(
+                f"the trade declaration names Y column {named[-1]} but Y has "
+                f"{k} columns ({tb.declared_by})")
+        missing = [c for c in range(k) if c not in named]
+        if missing:
+            raise ValueError(
+                f"the trade declaration leaves Y column(s) {missing} "
+                f"unclassified -- {[self.Y_labels[c] for c in missing]}. "
+                f"Every column of Y is exports, domestic final use, "
+                f"imports, or named in `other_columns` as neither; one left "
+                f"out is one left out of the commodity "
+                f"balance, which then looks right and is short by a column. "
+                f"Declared by: {tb.declared_by}")
+        if tb.imports_column is not None:
+            col = self.Y[:, tb.imports_column]
+            if float(col.max()) > 1e-6:
+                raise ValueError(
+                    f"Y column {tb.imports_column} is declared as imports but "
+                    f"its largest entry is {float(col.max()):.6g}, which is "
+                    f"positive. `imports_column` is for the DERIVED NEGATIVE "
+                    f"column a total-flow table carries; a positive one is "
+                    f"final demand, and reading it as imports subtracts "
+                    f"demand from supply. Declared by: {tb.declared_by}")
+        if tb.imports_vector is not None and len(tb.imports_vector) != n:
+            raise ValueError(
+                f"imports_vector has {len(tb.imports_vector)} values for {n} "
+                f"products ({tb.declared_by})")
+
+    def trade_vectors(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """(exports, imports, domestic final use) by product, or refuse.
+
+        The one refusal site for the three. The three named accessors below
+        are thin wrappers on this, so a table that cannot answer gives the
+        same sentence whichever one was asked -- and there is one place to
+        read to know what the engine does when nobody wrote the declaration
+        down.
+
+        It refuses when imports are unknown even though exports and domestic
+        final use are not. A partial answer is the one a caller papers over:
+        a commodity balance with imports taken as zero is an export estimate
+        equal to the whole surplus, which is a number and not an error.
+        """
+        tb = self.trade
+        if tb is None:
+            raise ValueError(
+                f"{self.table_id!r} was loaded by a route that does not say "
+                f"which of its {self.Y.shape[1]} final-demand columns are "
+                f"exports, or where its imports by product are. That is NOT "
+                f"SPECIFIED rather than zero: an absent declaration says only "
+                f"that nobody wrote it down. Load the table through a loader "
+                f"that declares it, or carry the declaration in the "
+                f"`metadata` sheet of this engine's own format.")
+        if not tb.has_imports:
+            raise ValueError(
+                f"{self.table_id!r} declares its exports and its domestic "
+                f"final use but not its imports BY PRODUCT ("
+                f"{tb.declared_by}). Its imports are known by purchasing "
+                f"industry, which is a different quantity and not a "
+                f"substitute. A commodity balance taking imports as zero "
+                f"estimates exports as the whole surplus, and that is a "
+                f"number rather than a refusal, which is why this refuses.")
+        E = self.Y[:, tb.export_columns].sum(axis=1)
+        D = self.Y[:, tb.domestic_columns].sum(axis=1)
+        if tb.imports_column is not None:
+            M = -self.Y[:, tb.imports_column]
+        else:
+            M = np.asarray(tb.imports_vector, float)
+        return E, M, D
+
+    def exports_by_product(self) -> np.ndarray:
+        """Exports by product. See `trade_vectors`."""
+        return self.trade_vectors()[0]
+
+    def imports_by_product(self) -> np.ndarray:
+        """Imports by product, POSITIVE. See `trade_vectors`."""
+        return self.trade_vectors()[1]
+
+    def domestic_final_use(self) -> np.ndarray:
+        """Final use EXCLUDING exports, by product. See `trade_vectors`."""
+        return self.trade_vectors()[2]
 
     @property
     def derived(self) -> bool:

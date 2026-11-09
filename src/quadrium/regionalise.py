@@ -44,6 +44,18 @@ import numpy as np
 
 METHODS = ("SLQ", "CILQ", "RLQ", "FLQ")
 
+
+def methods_phrase(sep: str = "or") -> str:
+    """`SLQ, CILQ, RLQ or FLQ` -- METHODS rendered for a sentence.
+
+    The list used to be written out by hand in four more places: the CLI's
+    `choices`, the workbook's validation, its gap report and the template's
+    instructions. A fifth method would have been added to some of them. The
+    phrase is generated here so that `must be ...` and `--method`'s choices
+    cannot disagree about what the engine accepts.
+    """
+    return f"{', '.join(METHODS[:-1])} {sep} {METHODS[-1]}"
+
 # Measured, not assumed. Sources named in the module docstring.
 EVIDENCE = {
     "slq_multiplier_bias_pct": (6.9, 20.0),
@@ -292,6 +304,13 @@ class Regionalisation:
             classification=classification,
             sector_codes=list(sector_codes),
             sector_labels=list(sector_labels or sector_codes),
+            # AND NO TRADE DECLARATION, which is not an omission. This Y is
+            # ONE residual column holding final demand and exports together,
+            # so it cannot be partitioned into the two: there is no column
+            # that is exports. That is also what stops a CHARM run being
+            # chained onto an LQ result -- it would need exports, imports by
+            # product and domestic final use separately, and a residual that
+            # nets them is not a source for any of the three.
             Z=Z, Y=Y, Y_labels=["final demand and exports (residual)"],
             VA=VA, VA_labels=["value added and imports (residual)"],
             X=self.X.copy(), source=source or f"Quadrium {self.method}",

@@ -67,7 +67,7 @@ def main():
     if not ine.exists():
         print(f"    -- {ine.name} is absent.")
         print("\n" + "=" * 78)
-        print("Nothing checked here.")
+        print(f"Nothing was checked: {ine.name} is absent.")
         return NOTHING_CHECKED
 
     import es_hosteleria as ex

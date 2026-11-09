@@ -68,7 +68,7 @@ from .precision import (assertable_tolerance,
                         assertable_tolerance_mixed,
                         printed_decimals)
 from .models import (AllocationKey, IOTable, ProxyStrength, Satellite,
-                     SupplyUseTables)
+                     SupplyUseTables, TradeBlock)
 
 
 class LoaderError(ValueError):
@@ -277,6 +277,24 @@ def load_uk_analytical_iot(path: Path | str) -> IOTable:
 
     year = _infer_year(menu)
     pxp = L["axis"].upper().startswith("CPA")
+    # WHICH PART OF THIS Y IS TRADE. The ONS prints ESA codes in row 3 and
+    # this loader already drops the subtotals among them by prefix, so the
+    # `P6*` test is a rule about the sheet's own codes.
+    #
+    # Imports are NOT declared: they are the `row_imports` row of `VA`, read
+    # along the industry axis, so they are imports by PURCHASING industry.
+    # Imports by product are not in this file at all, and `has_imports` False
+    # makes anything that needs them refuse instead of taking a zero.
+    _trade = TradeBlock(
+        export_columns=[i for i, c in enumerate(Y_labels)
+                        if c.startswith("P6")],
+        domestic_columns=[i for i, c in enumerate(Y_labels)
+                          if not c.startswith("P6")],
+        indirect_allocation=False,
+        declared_by=(f"ONS analytical table, final-demand codes {Y_labels} "
+                     f"off sheet row 3; exports are "
+                     f"{[c for c in Y_labels if c.startswith('P6')]}"))
+
     table = IOTable(
         table_id=f"UK-IOT-{'PXP' if pxp else 'IXI'}-{year}",
         country="United Kingdom", year=year,
@@ -285,6 +303,7 @@ def load_uk_analytical_iot(path: Path | str) -> IOTable:
                         f"({n} {'products' if pxp else 'industries'})"),
         sector_codes=codes, sector_labels=names,
         Z=Z, Y=Y, Y_labels=Y_labels, VA=VA, VA_labels=VA_labels, X=X,
+        trade=_trade,
         source=f"ONS, {menu[1] if len(menu) > 1 else path.name}",
         retrieved_at=datetime.now(timezone.utc),
         notes=(f"{'Product-by-product' if pxp else 'Industry-by-industry'}, "
@@ -455,6 +474,17 @@ def _ine_columns(t1):
         f"two known shapes differ only in whether exports are split into "
         f"European Union and third countries; a third shape needs its own map "
         f"here, checked against the workbook's own subtotals.")
+
+# WHICH OF THE WORKBOOK'S OWN COLUMNS ARE EXPORTS, by the number the INE
+# prints and not by a position in `fd_cols`.
+#
+# In the split shape 76 and 77 are the leaves and 75 is their subtotal, which
+# `fd_cols` excludes; in the no-split shape 75 IS the leaf and is included. So
+# testing membership against all three reads both shapes correctly and neither
+# by luck: whichever of the three is a LEAF is the one `fd_cols` carries.
+# Positions would have to be two different literals, which is how the column
+# indices ended up written by hand in two validators in the first place.
+_INE_EXPORT_SRC_COLS = (75, 76, 77)
 
 _INE_TOL = 1e-3   # million EUR. Observed residuals are ~1e-11; see M-058.
 
@@ -780,6 +810,40 @@ def load_ine_tio(path: Path | str, variant: str = "interior",
             f"euros en total repartidos en {affected} producto(s), el mayor "
             f"{gap[worst]:,.1f} en «{labels[worst]}». Véase OQ-D-04.")
 
+    # WHICH PART OF THIS Y IS TRADE, said here because here is where it is
+    # known: `fd_cols` was just chosen from the workbook's own header and the
+    # negative imports column was just built by subtraction. A RESIDUAL
+    # discrepancy column, when one was appended above, is named as NEITHER --
+    # it is not final use and must not be summed into it.
+    _exp = [i for i, c in enumerate(fd_cols) if c in _INE_EXPORT_SRC_COLS]
+    _dom = [i for i, c in enumerate(fd_cols) if c not in _INE_EXPORT_SRC_COLS]
+    if variant == "interior":
+        # Tabla 2 is domestic output, and its imports are the FIRST VA row --
+        # `_ine_block(t3, ...).sum(0)`, a sum over axis 0, which is imports by
+        # PURCHASING INDUSTRY. Imports by product are a different quantity and
+        # this variant does not carry them, so the declaration says so rather
+        # than pointing at a vector that is not what it would be read as.
+        _trade = TradeBlock(
+            export_columns=_exp, domestic_columns=_dom,
+            other_columns=list(range(len(fd_cols), Y.shape[1])),
+            indirect_allocation=False,
+            declared_by=(f"INE Tabla 2, final-demand columns "
+                         f"{list(fd_cols)} off header row 7; exports are the "
+                         f"workbook's own column(s) "
+                         f"{[c for c in fd_cols if c in _INE_EXPORT_SRC_COLS]}"))
+    else:
+        _trade = TradeBlock(
+            export_columns=_exp, domestic_columns=_dom,
+            imports_column=len(fd_cols),
+            other_columns=list(range(len(fd_cols) + 1, Y.shape[1])),
+            indirect_allocation=True,
+            declared_by=(f"INE Tabla 1, final-demand columns "
+                         f"{list(fd_cols)} off header row 7, plus the DERIVED "
+                         f"negative imports column this loader builds from "
+                         f"row {L['row_imports']}; exports are the workbook's "
+                         f"own column(s) "
+                         f"{[c for c in fd_cols if c in _INE_EXPORT_SRC_COLS]}"))
+
     year = _infer_ine_year(S)
     table = IOTable(
         table_id=f"ES-TIO-PXP-{year}-{variant}", country="España", year=year,
@@ -787,6 +851,7 @@ def load_ine_tio(path: Path | str, variant: str = "interior",
         classification="CPA 2008 (64 productos, numeración TIO del INE)",
         sector_codes=codes, sector_labels=labels,
         Z=Z, Y=Y, Y_labels=Y_labels, VA=VA, VA_labels=VA_labels, X=X,
+        trade=_trade,
         source=(f"INE, Contabilidad Nacional Anual de España, Revisión "
                 f"Estadística 2024. Tablas Input-Output {year} ({path.name})"),
         retrieved_at=datetime.now(timezone.utc),
@@ -818,6 +883,18 @@ _MIOC_SHEETS = ("ts total", "ts Cat", "ts resta Esp", "ts resta món")
 _MIOC_TAXES, _MIOC_NONRES = 84, 87
 _MIOC_VA = (89, 90, 91)
 _MIOC_OUTPUT = 93
+
+# IMPORTS BY PRODUCT, which are NOT the same thing as the imported inputs each
+# branch buys. Rows 94 and 95 sit inside IDESCAT's own supply identity -- output
+# plus imports equals total supply, column by column -- while the `VA` rows this
+# loader builds from the other two sheets are intermediate imports indexed by
+# PURCHASING BRANCH. Confusing the two leaves the identity 6,588 out, and this
+# project made that mistake once already.
+#
+# They lived in `run_charm_heterogeneity.py` until 2026-11-08, which meant
+# `run_charm.py` imported a derivation out of a validator that does not travel
+# to the public tree. A quantity the table carries belongs in the loader.
+_MIOC_IMPORT_ROWS = {"spain": 94, "world": 95}
 
 
 def load_idescat_mioc(path: Path | str) -> IOTable:
@@ -951,7 +1028,8 @@ def load_idescat_mioc(path: Path | str) -> IOTable:
 
     num_of = {int(clean(T[i][0])): i for i in range(hdr, len(T))
               if len(T[i]) and T[i][0] is not None and clean(T[i][0]).isdigit()}
-    want = (_MIOC_TAXES, _MIOC_NONRES, *_MIOC_VA, _MIOC_OUTPUT)
+    want = (_MIOC_TAXES, _MIOC_NONRES, *_MIOC_VA, _MIOC_OUTPUT,
+            *_MIOC_IMPORT_ROWS.values())
     absent = [k for k in want if k not in num_of]
     if absent:
         raise LoaderError(
@@ -986,6 +1064,35 @@ def load_idescat_mioc(path: Path | str) -> IOTable:
     published_uses = np.array([num(C, i, fd_end + 1) for i in prod_rows])
     residue = float(np.abs(published_uses - X).max())
 
+    # WHICH PART OF THIS Y IS TRADE. Exports are read off the sheet's own
+    # `EXPORTACIONS` head, the same way the final-demand block is delimited by
+    # `CONSUM FINAL` -- not off a position and not by matching Catalan prose.
+    exp_start = heads.get("exportacions")
+    if exp_start is None:
+        raise LoaderError(
+            f"{path.name}: no 'EXPORTACIONS' head on the sheet, so which "
+            f"final-demand columns are exports cannot be read off it. The "
+            f"column numbers are not assumed here, because a vintage that "
+            f"moves them would be read silently wrong.")
+    imports_by_product = np.array(
+        [num(T, num_of[_MIOC_IMPORT_ROWS["spain"]], j) for j in idx]
+    ) + np.array(
+        [num(T, num_of[_MIOC_IMPORT_ROWS["world"]], j) for j in idx])
+    _trade = TradeBlock(
+        export_columns=[i for i, j in enumerate(fd_cols) if j >= exp_start],
+        domestic_columns=[i for i, j in enumerate(fd_cols) if j < exp_start],
+        imports_vector=imports_by_product,
+        # `Z` is the 'ts Cat' sheet, domestic origin: the imported inputs are
+        # outside it, in `VA`. So this table is NOT an indirect-allocation one
+        # and anything that needs one must refuse it rather than rescale it.
+        indirect_allocation=False,
+        declared_by=(f"IDESCAT 'ts Cat', exports are the final-demand columns "
+                     f"at or beyond the sheet's own EXPORTACIONS head "
+                     f"(column {exp_start}); imports by product are rows "
+                     f"{_MIOC_IMPORT_ROWS['spain']} and "
+                     f"{_MIOC_IMPORT_ROWS['world']} of 'ts total', read by the "
+                     f"number IDESCAT prints"))
+
     year = _mioc_year(T, path)
     table = IOTable(
         table_id=f"CAT-MIOC-PXP-{year}", country="Catalunya", year=year,
@@ -993,6 +1100,7 @@ def load_idescat_mioc(path: Path | str) -> IOTable:
         classification="CPA 2008 (63 branques, numeració MIOC d'Idescat)",
         sector_codes=codes, sector_labels=labels,
         Z=Z, Y=Y, Y_labels=Y_labels, VA=VA, VA_labels=VA_labels, X=X,
+        trade=_trade,
         source=(f"Idescat, Marc Input-Output de Catalunya {year}, taula "
                 f"simètrica a 63 branques ({path.name})"),
         retrieved_at=datetime.now(timezone.utc),
@@ -1487,6 +1595,7 @@ def load_io_table(path: Path | str, sheet: str = "table") -> IOTable:
         satellites=_read_satellites(sheets, sector_codes, Path(path).name,
                                     region_codes),
         type_ii=_read_type_ii(meta),
+        trade=_read_trade(meta, Y_labels, len(sector_codes), Path(path).name),
         lineage=_read_lineage(meta))
     _assert_balances(table, Path(path).name)
     return table
@@ -1633,6 +1742,81 @@ def _read_type_ii(meta: dict) -> dict:
         return {}
     return {"income_rows": [r.strip() for r in rows.split(";") if r.strip()],
             "household": col}
+
+
+def _read_trade(meta: dict, Y_labels: list[str], n: int, name: str):
+    """The trade declaration a table was written with, resolved by LABEL.
+
+    Returns `None` when the file does not carry one, which is what a table
+    from a loader that does not declare its trade will have written. That is
+    NOT SPECIFIED and the accessors refuse on it.
+
+    A label that is not in `Y_labels` is refused rather than dropped, and so
+    is one that appears twice: both mean the file and the table disagree about
+    which column is which, and resolving either to a position would put
+    exports somewhere nobody chose.
+    """
+    if not any(k.startswith(("trade_export_", "trade_domestic_"))
+               for k in meta):
+        return None
+    lab = [str(y) for y in Y_labels]
+
+    def idx(label: str, key: str) -> int:
+        hits = [i for i, x in enumerate(lab) if x == label]
+        if not hits:
+            raise LoaderError(
+                f"{name}: `{key}` in the metadata sheet names the "
+                f"final-demand column {label!r}, which this table's Y does "
+                f"not have. Its columns are {lab}. A declaration that points "
+                f"at a column that is not there is not read as a position: "
+                f"the file and the table disagree about their own shape.")
+        if len(hits) > 1:
+            raise LoaderError(
+                f"{name}: `{key}` names {label!r} and Y carries that label "
+                f"{len(hits)} times, so which column it means cannot be "
+                f"decided. Labels are what this format resolves by, exactly "
+                f"so that a reordered table cannot be read wrong; two columns "
+                f"with one label breaks that and is refused rather than "
+                f"guessed.")
+        return hits[0]
+
+    def many(prefix: str) -> list[int]:
+        """`trade_export_1`, `trade_export_2`, ... in the order written.
+
+        One row per label rather than one row of joined labels, because a
+        final-demand label is an office's prose and can contain any
+        character: the INE's residual column contains a semicolon.
+        """
+        out, i = [], 1
+        while f"{prefix}{i}" in meta:
+            out.append(idx(str(meta[f"{prefix}{i}"]).strip(),
+                           f"{prefix}{i}"))
+            i += 1
+        return out
+
+    imports_column = None
+    if str(meta.get("trade_imports_column") or "").strip():
+        imports_column = idx(str(meta["trade_imports_column"]).strip(),
+                             "trade_imports_column")
+    imports_vector = None
+    if str(meta.get("trade_imports") or "").strip():
+        vals = [float(x) for x in str(meta["trade_imports"]).split(";")
+                if x.strip()]
+        if len(vals) != n:
+            raise LoaderError(
+                f"{name}: `trade_imports` carries {len(vals)} values for {n} "
+                f"products.")
+        imports_vector = np.asarray(vals, float)
+    return TradeBlock(
+        export_columns=many("trade_export_"),
+        domestic_columns=many("trade_domestic_"),
+        other_columns=many("trade_other_"),
+        imports_column=imports_column, imports_vector=imports_vector,
+        indirect_allocation=str(
+            meta.get("indirect_allocation") or "no").strip().lower()
+        in ("yes", "true", "1", "si", "sí"),
+        declared_by=(str(meta.get("trade_declared_by") or "").strip()
+                     or f"the `metadata` sheet of {name}"))
 
 
 def _read_provenance(sheets: dict, sector_codes: list[str]):
@@ -1931,6 +2115,10 @@ _AT_REGIONS = ("AT11", "AT12", "AT13", "AT21", "AT22",
 _AT_SECTORS = 56
 _AT_FINAL = ("57 HOU", "58 INV", "59 GOV", "60 EXPROW", "61 EXPROC", "62 Stocks")
 _AT_IMPORT_ROWS = {"70 ROWimp": "rest of world", "71 ROCimp": "rest of country"}
+# Which of `_AT_FINAL` are exports, named rather than matched: the column names
+# are this source's own and are checked for presence on load, so there is
+# nothing to detect and a substring rule would only hide a renamed column.
+_AT_EXPORTS = ("60 EXPROW", "61 EXPROC")
 
 
 def load_rokicki_austria(path: Path | str, region: str) -> IOTable:
@@ -2063,6 +2251,16 @@ def load_rokicki_austria(path: Path | str, region: str) -> IOTable:
         sector_codes=codes,
         sector_labels=names,
         Z=Z, Y=Y, Y_labels=list(_AT_FINAL),
+        # Imports are the ROWimp and ROCimp ROWS, so they are by purchasing
+        # branch and not by product: undeclared on purpose.
+        trade=TradeBlock(
+            export_columns=[i for i, c in enumerate(_AT_FINAL)
+                            if c in _AT_EXPORTS],
+            domestic_columns=[i for i, c in enumerate(_AT_FINAL)
+                              if c not in _AT_EXPORTS],
+            indirect_allocation=False,
+            declared_by=(f"Rokicki et al. columns {list(_AT_FINAL)}; exports "
+                         f"are {list(_AT_EXPORTS)}, the two the source names")),
         VA=np.array(va_rows, float), VA_labels=va_labels, X=X,
         source=f"Rokicki et al. (2021), Economic Systems Research 33(4), via "
                f"Zenodo record 7875024 ({f.name})")

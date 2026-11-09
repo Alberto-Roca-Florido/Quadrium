@@ -85,9 +85,18 @@ def main_() -> int:
     print(__doc__.strip().split("Run:")[0].rstrip())
     print("\n" + "=" * 78)
 
-    check("a national table to regionalise is on disk", ES.exists(), ES.name)
     if not ES.exists():
-        return 1
+        print(f"\nNothing was checked: the national table is absent — {ES}")
+        print("\n  Every check in this file runs the command against a real "
+              "national table, so")
+        print("  with none there is nothing to run and nothing to assert. A "
+              "missing fixture is")
+        print("  not a failing engine, and it is not a pass either: exit 3 "
+              "says CHECKED NOTHING,")
+        print("  which check.sh counts and names on its own and never counts "
+              "as passing.")
+        return 3
+    check("a national table to regionalise is on disk", ES.exists(), ES.name)
 
     tmp = Path(tempfile.mkdtemp(prefix="quadrium_regionalise_"))
     try:
@@ -131,6 +140,15 @@ def main_() -> int:
                   "median 11.7 % of the multiplier across 259 European "
                   "regions, measured in run_mrio_spillovers.py — and says "
                   "where the position comes from")
+        n_blocks = out.count("## What this is known to get wrong")
+        check("and the terminal gets that block exactly once",
+              n_blocks == 1,
+              f"{n_blocks} of them. Until 2026-11-08 `_write_regionalisation` "
+              f"ended with the same print twice, so every run of this command "
+              f"printed its whole report doubled, through both doors, and "
+              f"nothing caught it: a check that asserts a number is IN the "
+              f"output cannot see it there twice")
+
         check("and in the machine-readable record",
               len(ledger.get("caveats", [])) >= 3
               and ledger.get("delta") == 0.25

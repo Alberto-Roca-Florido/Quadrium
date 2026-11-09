@@ -105,6 +105,7 @@ import numpy as np
 from .io_loader import LoaderError, _open_workbook, load_eu_mrio, \
     load_eu_mrio_wide, \
     load_ine_tio, load_io_table, load_uk_analytical_iot
+from .regionalise import METHODS, methods_phrase
 from .models import (AllocationKey, Assumption, AssumptionLedger,
                      ProxyStrength, Satellite, Scenario, SplitSpec)
 
@@ -117,7 +118,10 @@ REQUIRED_SHEETS = ("project",)
 # THREE jobs, not two: `targets` with `table_kind: eurostat_sut` describes a
 # projection, which has no splits either. The first version of this check
 # listed only the first two and refused every projection workbook.
-ONE_OF_SHEETS = ("splits", "regionalise", "targets")
+# FOUR jobs now: `charm` arrived 2026-11-08 and is not a `regionalise` with a
+# different method. It takes the TOTAL-FLOW table where the quotient family
+# takes the DOMESTIC one, and it produces trade rather than a technology.
+ONE_OF_SHEETS = ("splits", "regionalise", "charm", "targets")
 TABLE_KINDS = ("uk_analytical", "interchange",
                "ine_interior", "ine_total", "eurostat", "eurostat_sut",
                "eu_mrio")
@@ -1122,8 +1126,9 @@ def load_config(path: Path | str, *, offline: bool = False,
         raise ConfigError(
             f"{path.name} says which table to use and then nothing to do with "
             f"it. Fill in `splits` to divide a sector, `regionalise` to "
-            f"estimate a region from it, or `targets` to project a supply-use "
-            f"pair. A workbook with none of the three describes no job.")
+            f"estimate a region's table from it, `charm` to estimate a "
+            f"region's two-way trade, or `targets` to project a supply-use "
+            f"pair. A workbook with none of the four describes no job.")
     meta = {}
     for r in sheets["project"]:
         if r and r[0] is not None and str(r[0]).strip():
@@ -1135,18 +1140,20 @@ def load_config(path: Path | str, *, offline: bool = False,
               for name in ("splits", "keys", "scenarios", "profiles",
                            "targets", "satellites")}
 
-    # `regionalise` is key/value like `project`, not a table of rows: the job
-    # has one set of parameters, not one per sector.
-    reg = {}
-    for r in sheets.get("regionalise", []):
-        if r and r[0] is not None and str(r[0]).strip():
-            k = str(r[0]).strip()
-            # `#` is a comment; `key` is the template's own header row, which
-            # the first version read as a setting called "key" and so treated
-            # an untouched template as a regionalisation with nothing in it.
-            if k.startswith("#") or k.lower() in ("key", "sector_code"):
-                continue
-            reg[k.lower()] = r[1] if len(r) > 1 else None
+    # `regionalise` and `charm` are key/value like `project`, not tables of
+    # rows: each job has one set of parameters, not one per sector.
+    reg = _keyvalue_sheet(sheets, "regionalise")
+    ch = _keyvalue_sheet(sheets, "charm")
+    if reg and ch:
+        raise ConfigError(
+            "this workbook has rows on BOTH the `regionalise` and the `charm` "
+            "sheet, and they are two different jobs on two different tables: "
+            "the location quotient family needs the DOMESTIC table and CHARM "
+            "the TOTAL-FLOW one, and M-075 says the multipliers they give are "
+            "not interchangeable. Clear one sheet, or use two workbooks.")
+    if ch:
+        return build_charm(meta, ch, base_dir=path.parent, label=path.name,
+                           offline=offline, refresh=refresh)
     if reg:
         return build_regionalisation(meta, reg, base_dir=path.parent,
                                      label=path.name, offline=offline,
@@ -1839,7 +1846,7 @@ def write_template(path: Path | str) -> Path:
         'table from a national one, instead of dividing a sector.',
         '',
         'Fill in three keys in column A, their values in column B:',
-        'method          SLQ | CILQ | RLQ | FLQ   (default FLQ)',
+        f'method          {" | ".join(METHODS)}   (default FLQ)',
         "delta           the FLQ's convexity parameter, 0 <= d < 1.",
         'REQUIRED for FLQ and there is no default:',
         'measured across ten regions in two countries',
@@ -1861,6 +1868,43 @@ def write_template(path: Path | str) -> Path:
         'family overstates local multipliers, and cross-hauling is not',
         'reproduced in any amount anyone chose. There is no way to',
         'suppress that, and the absence of one is deliberate.',
+    ])
+
+    # The FOURTH job, and the one whose sheet is shortest because the method
+    # has no parameters to choose. Its instructions carry the two things that
+    # go wrong instead: the wrong table, and output where employment belongs.
+    sheet("charm", ["key", "value"], [], [
+        '',
+        "LEAVE THIS SHEET EMPTY unless you want a region's GROSS two-way",
+        'trade -- how much it ships out AND takes in, both at once.',
+        '',
+        'One key in column A, its value in column B:',
+        'activity_path   a CSV, `sector_code,regional,national`, one row',
+        'per sector of the table named on the `project`',
+        'sheet. EMPLOYMENT, and the third column is',
+        'REQUIRED: eq. (30) reads the pair as regional',
+        'over national employment, and without it the',
+        "engine would put the table's own output there,",
+        'which assumes a thing nobody chose.',
+        '',
+        'There is no `method` and no `delta`. CHARM is the method and it has',
+        'no convexity parameter.',
+        '',
+        'THE TABLE MUST BE THE TOTAL-FLOW ONE, which is the opposite of what',
+        'the `regionalise` sheet needs: `ine_total`, not `ine_interior`, and',
+        '`eurostat` with `eurostat_variant   total`. A domestic table is',
+        'REFUSED rather than run, because it would return numbers and they',
+        'would be the wrong multipliers.',
+        '',
+        'What it writes is trade, not a table: `trade.csv` and',
+        '`heterogeneity.csv`. No regional table and no coefficients -- CHARM',
+        'estimates trade, not a technology.',
+        '',
+        'The heterogeneity is measured for the COUNTRY and carried to the',
+        'region unchanged. That is the method, and it is also its weakest',
+        'point: measured on Catalonia it carries the ordering of products but',
+        'not the level, under-predicting in 47 of 63. Every run prints that,',
+        'and there is no way to suppress it.',
     ])
 
     wb.save(path)
@@ -1913,6 +1957,126 @@ def read_activity(path: Path | str, table) -> tuple:
     return q_reg, q_nat, ("file" if has_national else "table output")
 
 
+def _keyvalue_sheet(sheets: dict, name: str) -> dict:
+    """A key/value sheet as a dict, skipping comments and the template header.
+
+    One function because there were three copies of this loop and they would
+    have drifted: `#` is a comment, and `key` is the TEMPLATE'S OWN header
+    row, which the first version read as a setting called "key" and so treated
+    an untouched template as a job with nothing in it.
+    """
+    out: dict = {}
+    for r in sheets.get(name, []):
+        if r and r[0] is not None and str(r[0]).strip():
+            k = str(r[0]).strip()
+            if k.startswith("#") or k.lower() in ("key", "sector_code"):
+                continue
+            out[k.lower()] = r[1] if len(r) > 1 else None
+    return out
+
+
+def build_charm(meta: dict, ch: dict, base_dir: Path = Path("."),
+                label: str = "<configuration>", *,
+                offline: bool = False,
+                refresh: bool = False) -> dict:
+    """A CHARM run described by a workbook rather than by flags.
+
+    The same shape `build_regionalisation` returns, so `cli.main`'s two
+    branches read alike. One key: `activity_path`. No `method`, because CHARM
+    is the method; no `delta`, because it has none; and no
+    `indirect_allocation`, because that is the loader's declaration and not a
+    thing a user may assert about a table they did not compile.
+    """
+    meta = {str(k).strip().lower(): v for k, v in (meta or {}).items()}
+    defaults_taken: list[str] = []
+    project_id = str(_need(meta, "project_id", "project", 0)).strip()
+
+    # THE CHEAP REFUSALS FIRST, before a load that parses a workbook to learn
+    # something the `project` sheet already says.
+    kind_said = str(meta.get("table_kind") or "").strip().lower()
+    variant_said = str(meta.get("eurostat_variant") or "").strip().lower()
+    if kind_said == "eu_mrio":
+        raise ConfigError(
+            "table_kind 'eu_mrio' is already a REGIONAL table: one region's "
+            "own block of the European MRIO. CHARM estimates a region's trade "
+            "from a NATIONAL table, so there is nothing here for it to "
+            "estimate from.")
+    if kind_said == "ine_interior":
+        raise ConfigError(
+            "table_kind 'ine_interior' is the INE's Tabla 2, the DOMESTIC "
+            "table: its intermediate matrix holds home-produced flows only. "
+            "CHARM's coefficients are z_ij / X_j on a table where imported "
+            "inputs are distributed across `Z` — the indirect-allocation "
+            "convention, STE_14 p. 12. Use `table_kind: ine_total`.")
+    if kind_said == "uk_analytical":
+        raise ConfigError(
+            "table_kind 'uk_analytical' is published at DOMESTIC use, with "
+            "imports as a value-added row read along the industry axis. The "
+            "file carries no total-flow variant and no imports by product, so "
+            "there is nothing to form a commodity balance from. That is a "
+            "property of the publication, not of this engine.")
+    if kind_said == "eurostat" and variant_said in ("", "domestic"):
+        raise ConfigError(
+            "table_kind 'eurostat' defaults to `eurostat_variant: domestic`, "
+            "which keeps imports out of the intermediate matrix. CHARM needs "
+            "them in it. Add `eurostat_variant   total` to the `project` "
+            "sheet.")
+
+    table, table_path, kind = _load_declared_table(
+        meta, base_dir, {}, offline, refresh, defaults_taken)
+
+    # AND THE TWO THE TABLE ITSELF ANSWERS, which no flag and no key can argue
+    # with. Same two refusals as the command-line door, in the same words.
+    if table.trade is None:
+        raise ConfigError(
+            f"{Path(str(table_path)).name} was read by a route that does not "
+            f"say which of its final-demand columns are exports or where its "
+            f"imports by product are, so a commodity balance cannot be formed "
+            f"from it. That is NOT SPECIFIED rather than zero. `ine_total` and "
+            f"`eurostat` with `eurostat_variant: total` declare it.")
+    if not table.trade.indirect_allocation:
+        raise ConfigError(
+            f"{Path(str(table_path)).name} is a DOMESTIC table: its "
+            f"intermediate matrix holds home-produced flows only.\n"
+            f"  Declared by: {table.trade.declared_by}\n"
+            f"  CHARM needs the indirect-allocation table, STE_14 p. 12. Run "
+            f"on a domestic one it would return numbers, and they would be "
+            f"the wrong multipliers rather than an error.")
+
+    ap = ch.get("activity_path")
+    if not ap or not str(ap).strip():
+        raise ConfigError(
+            "the `charm` sheet needs `activity_path`: a CSV of the region's "
+            "EMPLOYMENT by sector, with the nation's in a third column. "
+            "eq. (30) scales national output by the regional employment "
+            "share, sector by sector, and there is nothing to scale by "
+            "without it.")
+    ap = Path(str(ap).strip())
+    if not ap.is_absolute():
+        ap = (Path(base_dir) / ap).resolve()
+    L_reg, L_nat, national_from = read_activity(ap, table)
+    # The one default `read_activity` offers that this job must not take: with
+    # no third column it fills the national side with the table's own OUTPUT,
+    # which is right for a location quotient and wrong here, because eq. (30)
+    # reads the pair as EMPLOYMENT.
+    if national_from != "file":
+        raise ConfigError(
+            f"{ap.name} carries no `national` column, and for CHARM that "
+            f"cannot be defaulted: eq. (30) reads this pair as EMPLOYMENT, "
+            f"regional over national. With the column absent the engine would "
+            f"substitute the table's own output, which assumes a thing nobody "
+            f"chose. Add a third column, `national`.")
+
+    return {"kind": "charm", "project_id": project_id,
+            "title": str(meta.get("title") or f"{project_id} — CHARM"),
+            "table": table, "source_file": table_path, "table_kind": kind,
+            "Q_region": L_reg, "Q_national": L_nat,
+            "national_activity_from": national_from,
+            "activity_file": ap,
+            "notes": str(meta.get("notes") or ""),
+            "defaults_taken": defaults_taken}
+
+
 def build_regionalisation(meta: dict, reg: dict, base_dir: Path = Path("."),
                           label: str = "<configuration>", *,
                           offline: bool = False,
@@ -1939,9 +2103,9 @@ def build_regionalisation(meta: dict, reg: dict, base_dir: Path = Path("."),
         meta, base_dir, {}, offline, refresh, defaults_taken)
 
     method = str(reg.get("method") or "FLQ").strip().upper()
-    if method not in ("SLQ", "CILQ", "RLQ", "FLQ"):
+    if method not in METHODS:
         raise ConfigError(f"method {method!r} on the `regionalise` sheet must "
-                          f"be SLQ, CILQ, RLQ or FLQ")
+                          f"be {methods_phrase()}")
     delta = reg.get("delta")
     if delta is not None and str(delta).strip() != "":
         try:
@@ -2047,16 +2211,12 @@ def plan_workbook(path: Path | str) -> dict:
     rows = {name: _rows(sheets, name)
             for name in ("splits", "keys", "scenarios", "profiles", "targets",
                          "satellites")}
-    reg = {}
-    for r in sheets.get("regionalise", []):
-        if r and r[0] is not None and str(r[0]).strip():
-            k = str(r[0]).strip()
-            if k.startswith("#") or k.lower() in ("key", "sector_code"):
-                continue
-            reg[k.lower()] = r[1] if len(r) > 1 else None
+    reg = _keyvalue_sheet(sheets, "regionalise")
+    ch = _keyvalue_sheet(sheets, "charm")
 
     kind = str(meta.get("table_kind") or "").strip().lower()
-    job = ("regionalise" if reg else
+    job = ("charm" if ch else
+           "regionalise" if reg else
            "project" if rows["targets"] else
            "split" if rows["splits"] else None)
 
@@ -2187,9 +2347,10 @@ def plan_workbook(path: Path | str) -> dict:
     if job is None:
         gap("splits", "the workbook says which table to use and nothing to "
                       "do with it",
-            "`splits` divides a sector, `regionalise` estimates a region, "
-            "`targets` projects a supply-use pair. A workbook with none of "
-            "the three describes no job",
+            "`splits` divides a sector, `regionalise` estimates a region's "
+            "table, `charm` estimates a region's two-way trade, `targets` "
+            "projects a supply-use pair. A workbook with none of the four "
+            "describes no job",
             "fill in ONE of them")
 
     if job == "split":
@@ -2377,7 +2538,7 @@ def plan_workbook(path: Path | str) -> dict:
                 ("method",
                  "which location quotient is a methodological choice with "
                  "measured consequences",
-                 "SLQ, CILQ, RLQ or FLQ")):
+                 methods_phrase())):
             if not str(reg.get(need) or "").strip():
                 gap("regionalise", f"`{need}` is empty", why, fix)
         if str(reg.get("method") or "FLQ").strip().upper() == "FLQ" \
@@ -2387,6 +2548,50 @@ def plan_workbook(path: Path | str) -> dict:
                 "0.14 to 0.60, so a default would be a guess wearing a number",
                 "a value in [0, 1). The report prints what a blind choice "
                 "costs")
+
+    if job == "charm":
+        if not str(ch.get("activity_path") or "").strip():
+            gap("charm", "`activity_path` is empty",
+                "eq. (30) scales national output by the region's share of "
+                "national EMPLOYMENT, sector by sector, and there is nothing "
+                "to scale by without it",
+                "a CSV with `sector_code,regional,national`. The third column "
+                "is required here: without it the engine would put output "
+                "where employment belongs")
+        # THE TABLE, which for this job is the other one. Said as a gap rather
+        # than left to the load, because `--plan` exists so an analyst learns
+        # everything that is wrong in one pass.
+        if kind == "ine_interior":
+            gap("project", "`table_kind` is `ine_interior` and the job is CHARM",
+                "Tabla 2 is the DOMESTIC table: its intermediate matrix holds "
+                "home-produced flows only, and CHARM needs imported inputs "
+                "distributed across it (STE_14 p. 12)",
+                "`ine_total`")
+        if kind in ("uk_analytical", "eu_mrio"):
+            gap("project", f"`table_kind` is `{kind}` and the job is CHARM",
+                "the ONS table is published at domestic use with no "
+                "total-flow variant and no imports by product; the European "
+                "MRIO block is already a region"
+                if kind == "uk_analytical" else
+                "the European MRIO block is already a REGIONAL table, so "
+                "there is no national table here to estimate a region from",
+                "a national total-flow table: `ine_total`, or `eurostat` with "
+                "`eurostat_variant   total`")
+        if kind == "eurostat" and str(
+                meta.get("eurostat_variant") or "").strip().lower() in (
+                "", "domestic"):
+            gap("project", "`eurostat_variant` is domestic and the job is CHARM",
+                "the domestic variant keeps imports out of the intermediate "
+                "matrix and CHARM needs them in it",
+                "`eurostat_variant   total`")
+        gap("charm", "regional final use is proportional to employment",
+            "eq. (32) allocates the region's final use by its aggregate "
+            "employment share. The source itself names this the method's "
+            "weakest input and says a hybrid approach should replace it with "
+            "surveyed household consumption (STE_14 p. 28)",
+            "nothing to fix — the run says so in its own report, and this is "
+            "here so it is known before the run and not after",
+            severity="weak")
 
     blocking = [g for g in gaps if g["severity"] == "blocking"]
     return {"ready": not blocking, "path": str(path), "gaps": gaps,

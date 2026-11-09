@@ -1,7 +1,7 @@
 {
  "_note": "Which of the engine's own refusals anything in the suite has ever reached. Re-taken by library/tools/sweep_refusals.py, which patches each quadrium exception type to record its raise site and runs every validator and the unit tests as separate processes. Sites are recorded as file:line and translated to file::function keys through the same syntax-tree pass run_refusal_coverage.py uses.",
- "taken": "2026-09-12",
- "n_sites": 224,
+ "taken": "2026-11-09",
+ "n_sites": 240,
  "fired": [
   "acquire.py::_open::answered HTTP .",
   "acquire.py::_open::answered HTTP . That is access control, and this eng",
@@ -66,6 +66,10 @@
   "config.py::_type_ii_spec::`type_ii_household_column` is , which this table doe",
   "config.py::_type_ii_spec::`type_ii_income_rows` names , which this table does ",
   "config.py::_type_ii_spec::a type II closure needs BOTH `type_ii_income_rows` a",
+  "config.py::build_charm::carries no `national` column, and for CHARM that can",
+  "config.py::build_charm::table_kind 'eu_mrio' is already a REGIONAL table: on",
+  "config.py::build_charm::table_kind 'ine_interior' is the INE's Tabla 2, the ",
+  "config.py::build_charm::table_kind 'uk_analytical' is published at DOMESTIC ",
   "config.py::build_config::a type II closure cannot be built on this table: . R",
   "config.py::build_config::sheet 'keys', row : value is not a number value",
   "config.py::build_config::sheet 'profiles' names scenario(s) that the 'scenari",
@@ -78,7 +82,7 @@
   "config.py::build_config::split ' ' names key ' ', which is not in the 'keys' ",
   "config.py::build_config::split ' ' names more than one allocation key ( ) acr",
   "config.py::build_regionalisation::delta is not a number",
-  "config.py::build_regionalisation::method on the `regionalise` sheet must be SLQ, CILQ,",
+  "config.py::build_regionalisation::method on the `regionalise` sheet must be",
   "config.py::build_regionalisation::table_kind 'eu_mrio' is already a REGIONAL table: on",
   "config.py::build_regionalisation::the `regionalise` sheet needs `activity_path`: a CSV",
   "config.py::build_satellites::satellite covers of the table's sectors. are absent:",
@@ -90,6 +94,7 @@
   "config.py::build_satellites::satellites: gives twice. Two figures for one sector ",
   "config.py::load_config::is missing the sheet(s) . Run `python3 run_quadrium.",
   "config.py::load_config::says which table to use and then nothing to do with ",
+  "config.py::load_config::this workbook has rows on BOTH the `regionalise` and",
   "config.py::read_activity::activity_path points at , which does not exist. Path",
   "config.py::read_activity::and the table do not describe the same sectors. in t",
   "config.py::read_activity::has a value that is not a number:",
@@ -222,17 +227,21 @@
   "transformation.py::transform::model is not one of the four in CORE_013 Figure 12.2"
  ],
  "by_type": {
+  "AccessRefused": {
+   "total": 2,
+   "fired": 2
+  },
   "AcquisitionRefused": {
    "total": 6,
-   "fired": 1
+   "fired": 6
   },
   "BalancingError": {
    "total": 4,
    "fired": 4
   },
   "ConfigError": {
-   "total": 41,
-   "fired": 25
+   "total": 89,
+   "fired": 85
   },
   "DegenerateMarginError": {
    "total": 2,
@@ -240,15 +249,15 @@
   },
   "DisaggregationError": {
    "total": 19,
-   "fired": 16
+   "fired": 19
   },
   "EurostatError": {
    "total": 29,
-   "fired": 16
+   "fired": 29
   },
   "LoaderError": {
-   "total": 45,
-   "fired": 20
+   "total": 69,
+   "fired": 56
   },
   "MarginImbalanceError": {
    "total": 1,
@@ -260,15 +269,15 @@
   },
   "SignInfeasibleError": {
    "total": 3,
-   "fired": 2
+   "fired": 3
   },
   "SutEuroError": {
    "total": 4,
-   "fired": 2
+   "fired": 4
   },
   "TransformationError": {
    "total": 11,
-   "fired": 4
+   "fired": 10
   }
  },
  "classified": {
@@ -284,6 +293,9 @@
   "balancing.py::balance::locked cells were requested with GRAS. GRAS as speci": "data",
   "balancing.py::ras": "data",
   "balancing.py::select_method": "data",
+  "cli.py::_load_total_flow::--national-kind has no total-flow variant.": "caller",
+  "cli.py::_load_total_flow::the Catalan workbook's intermediate matrix is the 't": "source",
+  "cli.py::_load_total_flow::the ONS publishes its analytical table at DOMESTIC u": "source",
   "config.py::_employment_cell": "source",
   "config.py::_eurostat_cache_path::eurostat_dataset is neither one of nor a naio_10_* c": "workbook",
   "config.py::_eurostat_cache_path::eurostat_geo is . It must be a two-letter country co": "workbook",
@@ -335,6 +347,14 @@
   "config.py::_type_ii_spec::`type_ii_household_column` is , which this table doe": "workbook",
   "config.py::_type_ii_spec::`type_ii_income_rows` names , which this table does ": "workbook",
   "config.py::_type_ii_spec::a type II closure needs BOTH `type_ii_income_rows` a": "workbook",
+  "config.py::build_charm::carries no `national` column, and for CHARM that can": "workbook",
+  "config.py::build_charm::is a DOMESTIC table: its intermediate matrix holds h": "workbook",
+  "config.py::build_charm::table_kind 'eu_mrio' is already a REGIONAL table: on": "workbook",
+  "config.py::build_charm::table_kind 'eurostat' defaults to `eurostat_variant:": "workbook",
+  "config.py::build_charm::table_kind 'ine_interior' is the INE's Tabla 2, the ": "workbook",
+  "config.py::build_charm::table_kind 'uk_analytical' is published at DOMESTIC ": "workbook",
+  "config.py::build_charm::the `charm` sheet needs `activity_path`: a CSV of th": "workbook",
+  "config.py::build_charm::was read by a route that does not say which of its f": "workbook",
   "config.py::build_config::a type II closure cannot be built on this table: . R": "workbook",
   "config.py::build_config::sheet 'keys', row : value is not a number value": "workbook",
   "config.py::build_config::sheet 'profiles' names scenario(s) that the 'scenari": "workbook",
@@ -347,7 +367,7 @@
   "config.py::build_config::split ' ' names key ' ', which is not in the 'keys' ": "workbook",
   "config.py::build_config::split ' ' names more than one allocation key ( ) acr": "workbook",
   "config.py::build_regionalisation::delta is not a number": "workbook",
-  "config.py::build_regionalisation::method on the `regionalise` sheet must be SLQ, CILQ,": "workbook",
+  "config.py::build_regionalisation::method on the `regionalise` sheet must be": "workbook",
   "config.py::build_regionalisation::table_kind 'eu_mrio' is already a REGIONAL table: on": "workbook",
   "config.py::build_regionalisation::the `regionalise` sheet needs `activity_path`: a CSV": "workbook",
   "config.py::build_satellites::satellite covers of the table's sectors. are absent:": "workbook",
@@ -359,6 +379,7 @@
   "config.py::build_satellites::satellites: gives twice. Two figures for one sector ": "workbook",
   "config.py::load_config::is missing the sheet(s) . Run `python3 run_quadrium.": "workbook",
   "config.py::load_config::says which table to use and then nothing to do with ": "workbook",
+  "config.py::load_config::this workbook has rows on BOTH the `regionalise` and": "workbook",
   "config.py::read_activity::activity_path points at , which does not exist. Path": "workbook",
   "config.py::read_activity::and the table do not describe the same sectors. in t": "workbook",
   "config.py::read_activity::has a value that is not a number:": "workbook",
@@ -436,6 +457,7 @@
   "io_loader.py::_read_satellites::: satellite covers of sectors and is missing . A par": "source",
   "io_loader.py::_read_satellites::: the Satellites sheet is missing the column(s) . It": "source",
   "io_loader.py::_read_satellites::: the table carries a regional axis and its Satellit": "workbook",
+  "io_loader.py::_read_trade": "workbook",
   "io_loader.py::_tod_axes::the sheet has no activity index row. Row 9 should nu": "source",
   "io_loader.py::_tod_axes::the sheet has no product labelled '1. \u2026' in column w": "source",
   "io_loader.py::_tod_need": "source",
@@ -443,6 +465,8 @@
   "io_loader.py::_uk_layout::: the 'IOT' sheet has no primary-input row labelled ": "source",
   "io_loader.py::_uk_layout::: the 'IOT' sheet's row codes are not its column cod": "source",
   "io_loader.py::col": "workbook",
+  "io_loader.py::idx::: ` ` in the metadata sheet names the final-demand c": "workbook",
+  "io_loader.py::idx::: ` ` names and Y carries that label times, so which": "workbook",
   "io_loader.py::load_allocation_keys::: no row carries a new_sector_code, so the file decl": "workbook",
   "io_loader.py::load_allocation_keys::: rows disagree on source or source_year ( , ). One ": "workbook",
   "io_loader.py::load_allocation_keys::: strength is not strong/medium/weak. The three are ": "workbook",
@@ -453,6 +477,7 @@
   "io_loader.py::load_eu_mrio::output by rows (`TOTAL`) and by columns (`INPUT`) di": "source",
   "io_loader.py::load_eu_mrio::region is not in the archive. The block codes France": "workbook",
   "io_loader.py::load_eu_mrio::trades with no other region in the archive, in eithe": "source",
+  "io_loader.py::load_idescat_mioc::: no 'EXPORTACIONS' head on the sheet, so which fina": "source",
   "io_loader.py::load_idescat_mioc::: no row carries 'Codi', which is how the product co": "source",
   "io_loader.py::load_idescat_mioc::: the final-demand block is not delimited by a 'CONS": "source",
   "io_loader.py::load_idescat_mioc::: the row codes are not the column codes ( rows agai": "source",
@@ -499,5 +524,5 @@
  },
  "_classification": "What each refusal judges. Keyed by the FUNCTION it sits in, with a few identified by a distinctive fragment of their own message where one function judges both a caller's arguments and a table's contents. NOT by file:line -- that version silently re-labelled 38 sites when the Catalan loader was inserted above them. `workbook` the user's own spreadsheet, `source` a file from a statistical office, `scenario` what they asked for, `upstream` a failure re-raised with guidance, `caller` an internal API contract, `data` the numbers themselves.",
  "key_format": "file.py::function, plus a fragment of the message when one function raises more than once. NOT file:line -- editing a module shifts every line below the edit, which silently re-labelled 38 sites once and broke this check again on 2026-09-01.",
- "floor": 217
+ "floor": 222
 }

@@ -35,6 +35,7 @@ import numpy as np
 # path and calls `main` below.
 from quadrium.config import ConfigError, load_config, write_template  # noqa: E402
 from quadrium.project import IOProject  # noqa: E402
+from quadrium.regionalise import METHODS  # noqa: E402
 from quadrium.scenarios import ScenarioInfeasible  # noqa: E402
 
 
@@ -631,18 +632,32 @@ def main(argv=None) -> int:
                     help="where --national came from, so the DOMESTIC variant "
                          "is the one loaded (default: interchange, this "
                          "engine's own format)")
-    ap.add_argument("--method", default="FLQ", choices=["SLQ", "CILQ", "RLQ",
-                                                        "FLQ"],
+    ap.add_argument("--method", default="FLQ", choices=list(METHODS),
                     help="which location quotient (default: FLQ)")
     ap.add_argument("--delta", type=float, metavar="D",
                     help="the FLQ's convexity parameter. There is no default: "
                          "measured across ten regions in two countries it runs "
                          "from 0.14 to 0.60, median 0.26, so any default would "
                          "be a guess wearing a number")
+    ap.add_argument("--charm", metavar="ACTIVITY.csv",
+                    help="estimate a region's GROSS two-way trade (CHARM, "
+                         "M-075). Needs --national, and that table must be "
+                         "the TOTAL-FLOW one — the opposite of what "
+                         "--regionalise needs")
     ap.add_argument("--name", metavar="NAME",
                     help="the output folder's name (default: regionalised_<method>)")
     args = ap.parse_args(argv)
 
+    if args.regionalise and args.charm:
+        # TWO JOBS ON TWO DIFFERENT TABLES, so this is not a combination to
+        # resolve by precedence. M-075's DOMESTIC_IMPORT_TREATMENT: the
+        # quotient family needs the DOMESTIC table and CHARM the TOTAL-FLOW
+        # one, and the multipliers they give are not interchangeable.
+        print("--regionalise and --charm are two different jobs and they need "
+              "two different tables: the location quotient family needs the "
+              "DOMESTIC table, CHARM the TOTAL-FLOW one. Run them separately, "
+              "each with its own --national.", file=sys.stderr)
+        return 2
     if args.regionalise:
         if not args.national:
             print("--regionalise needs --national: a location quotient scales "
@@ -650,8 +665,15 @@ def main(argv=None) -> int:
                   file=sys.stderr)
             return 2
         return _regionalise(args)
+    if args.charm:
+        if not args.national:
+            print("--charm needs --national: CHARM estimates a region's trade "
+                  "from a national table, so there has to be one.",
+                  file=sys.stderr)
+            return 2
+        return _charm(args)
     if args.national:
-        print("--national only means something with --regionalise.",
+        print("--national only means something with --regionalise or --charm.",
               file=sys.stderr)
         return 2
 
@@ -743,6 +765,39 @@ def main(argv=None) -> int:
             Path(cfg["source_file"]).name, Path(cfg["activity_file"]).name,
             cfg["national_activity_from"] == "file",
             cfg["Q_region"], cfg["Q_national"])
+
+    # The fourth job, dispatched here for the same reason: `_describe` reads
+    # cfg["splits"] and a CHARM run has none. `build_charm` has already made
+    # every refusal this needs, including the two about the table itself, so
+    # by here the run is known to be one the method admits.
+    if cfg.get("kind") == "charm":
+        from . import diagnostics
+        from .charm import charm
+        table = cfg["table"]
+        A_X = np.nan_to_num(
+            diagnostics.technical_coefficients(table.Z, table.X))
+        E, M, D = table.trade_vectors()
+        try:
+            res = charm(A_X=A_X, X_national=table.X,
+                        Z_S_national=table.Z.sum(axis=1), D_national=D,
+                        E_national=E, M_national=M,
+                        L_region=cfg["Q_region"], L_national=cfg["Q_national"],
+                        indirect_allocation=table.trade.indirect_allocation)
+        except ValueError as exc:
+            print(f"The method refused:\n\n  {exc}\n", file=sys.stderr)
+            return 2
+        if args.check:
+            print(f"Table   : {table.table_id} — {table.n} products, "
+                  f"total flow")
+            print(f"Declared: {table.trade.declared_by}")
+            print(f"Region  : {res.employment_share * 100:.2f} % of national "
+                  f"employment\n")
+            print(res.report())
+            return 0
+        print(f"Table   : {table.table_id} — {table.n} products, total flow")
+        return _write_charm(
+            res, table, args.outputs, cfg["project_id"],
+            Path(cfg["source_file"]).name, Path(cfg["activity_file"]).name)
 
     _describe(cfg)
     # Printed on BOTH paths. Warning only under --check would mean the run that
@@ -886,6 +941,252 @@ def _write_regionalisation(res, table, out_root, name, national_name,
                out / "assumption_ledger.json")
 
     print("\n".join(lines))
+    print(f"\nWritten to {out}")
+    return 0
+
+
+def _load_total_flow(kind, path):
+    """The TOTAL-FLOW table, which is the opposite of what `--regionalise` loads.
+
+    `_load_national` above names each loader with the variant that gives the
+    DOMESTIC table, because that is what a location quotient needs. CHARM needs
+    the other one: `M-075`'s DOMESTIC_IMPORT_TREATMENT says the two give
+    different multipliers -- domestic output against supply -- and are not
+    interchangeable, so choosing between `--regionalise` and `--charm` is
+    choosing which multiplier you want and not merely which estimator.
+
+    Two kinds REFUSE BY NAME rather than falling through to something close
+    enough. A fall-through is how an analyst gets a plausible wrong answer with
+    no error, which is the failure this whole route is arranged to prevent.
+    """
+    from .io_loader import LoaderError, load_io_table
+    if kind == "ine":
+        from .io_loader import load_ine_tio
+        return load_ine_tio(path, variant="total")
+    if kind == "eurostat":
+        from .eurostat import load_iot
+        return load_iot(path, variant="total")
+    if kind == "interchange":
+        return load_io_table(path)
+    if kind == "uk":
+        raise LoaderError(
+            "the ONS publishes its analytical table at DOMESTIC use, with "
+            "imports as a value-added row read along the industry axis. The "
+            "file carries no total-flow variant and no imports by product, so "
+            "CHARM has nothing to form a commodity balance from. This is a "
+            "property of the publication and not of the loader.")
+    if kind == "idescat":
+        raise LoaderError(
+            "the Catalan workbook's intermediate matrix is the 'ts Cat' sheet, "
+            "which is DOMESTIC origin: its imports by product sit outside `Z`, "
+            "in the supply identity. CHARM needs them distributed inside it. "
+            "The workbook is also already a two-region table, so a "
+            "single-region estimate of its trade is not what it is for.")
+    raise LoaderError(f"--national-kind {kind!r} has no total-flow variant.")
+
+
+def _charm(args) -> int:
+    """Estimate a region's GROSS two-way trade, and print what it costs.
+
+    Every other non-survey method here estimates NET trade and puts it on one
+    side. CHARM keeps the balance and estimates the volume separately, so both
+    directions of a product's trade can be positive at once -- which is what
+    the commodity balance cannot represent, and what `OQ-R-01` measured at
+    28.3 % of Catalonia's interregional trade.
+
+    It is its own job and not a fifth `--method`: it takes a different table
+    and it produces different objects. There is no `A^rr` here and no regional
+    table to write.
+    """
+    import numpy as np
+
+    from . import diagnostics
+    from .charm import charm
+    from .io_loader import LoaderError
+
+    try:
+        table = _load_total_flow(args.national_kind, args.national)
+    except (LoaderError, FileNotFoundError, ValueError, KeyError) as exc:
+        print(f"Could not read {args.national} as a "
+              f"{args.national_kind} TOTAL-FLOW national table:\n\n  "
+              f"{str(exc).splitlines()[0]}\n\n"
+              f"CHARM needs the table whose intermediate matrix includes "
+              f"imported inputs — the opposite of the one --regionalise needs. "
+              f"Use --national-kind to say where the file came from.",
+              file=sys.stderr)
+        return 2
+
+    # WHAT THE TABLE ITSELF SAYS, and the two refusals that cannot be argued
+    # with by a flag. `indirect_allocation` is the loader's declaration because
+    # a user cannot assert a convention about a table they did not compile.
+    if table.trade is None:
+        print(f"{args.national} was read by a route that does not say which of "
+              f"its final-demand columns are exports or where its imports by "
+              f"product are, so a commodity balance cannot be formed from it. "
+              f"That is NOT SPECIFIED rather than zero.\n\n"
+              f"  --national-kind ine and eurostat declare it. A file in this "
+              f"engine's own format carries the declaration in its `metadata` "
+              f"sheet when it was written from a table that had one.",
+              file=sys.stderr)
+        return 2
+    if not table.trade.indirect_allocation:
+        print(f"{args.national} is a DOMESTIC table: its intermediate matrix "
+              f"holds home-produced flows only.\n\n"
+              f"  Declared by: {table.trade.declared_by}\n\n"
+              f"  CHARM's technical coefficients are z_ij / X_j on a table "
+              f"where imported inputs are distributed across `Z` — the "
+              f"indirect-allocation convention, STE_14 p. 12. Run on a "
+              f"domestic table it would return numbers, and they would be the "
+              f"wrong multipliers rather than an error, which is why this "
+              f"refuses instead.",
+              file=sys.stderr)
+        return 2
+
+    from .config import ConfigError as _CfgError
+    from .config import read_activity
+    try:
+        L_reg, L_nat, national_from = read_activity(args.charm, table)
+    except _CfgError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    # AND THE ONE PLACE THIS ROUTE CANNOT REUSE `read_activity`'s DEFAULT.
+    #
+    # With no third column it fills the national side with the table's own
+    # OUTPUT, which is the right default for a location quotient. Eq. (30)
+    # reads this pair as EMPLOYMENT, so taking output there would silently
+    # assume every sector's labour productivity equals its output share --
+    # which is not the source's assumption and is not any assumption anybody
+    # chose.
+    if national_from != "file":
+        print(f"{args.charm} carries no `national` column, and for CHARM that "
+              f"cannot be defaulted.\n\n"
+              f"  eq. (30) reads this pair as EMPLOYMENT, regional over "
+              f"national, sector by sector. With the column absent the engine "
+              f"would substitute the table's own output, which assumes a "
+              f"thing nobody chose. Add a third column, `national`, with the "
+              f"country's employment by sector.",
+              file=sys.stderr)
+        return 2
+
+    # z_ij / X_j, eq. (15) -- correct here PRECISELY BECAUSE this `Z` is the
+    # total-flow one, the mirror image of the care _regionalise takes in the
+    # other direction.
+    A_X = np.nan_to_num(diagnostics.technical_coefficients(table.Z, table.X))
+    E, M, D = table.trade_vectors()
+    try:
+        res = charm(A_X=A_X, X_national=table.X,
+                    Z_S_national=table.Z.sum(axis=1), D_national=D,
+                    E_national=E, M_national=M,
+                    L_region=L_reg, L_national=L_nat,
+                    indirect_allocation=table.trade.indirect_allocation)
+    except ValueError as exc:
+        print(f"The method refused:\n\n  {exc}\n", file=sys.stderr)
+        return 2
+
+    return _write_charm(res, table, args.outputs, args.name,
+                        Path(args.national).name, Path(args.charm).name)
+
+
+def _write_charm(res, table, out_root, name, national_name,
+                 activity_name) -> int:
+    """Write a CHARM run, whichever door asked for it.
+
+    There is no `to_table()` here and that is deliberate, not missing. CHARM
+    returns five vectors by commodity; the regional `Z` they would imply is
+    `A^X @ diag(X^R)`, which is the nation's technology BY ASSUMPTION and not
+    something CHARM estimates. And an `IOTable` with one residual final-demand
+    column -- which is what `Regionalisation.to_table()` honestly produces --
+    would net `E` against `M` and destroy the one quantity this method exists
+    to compute.
+    """
+    import numpy as np
+
+    from .export import write_json
+
+    out = Path(out_root) / (name or "charm")
+    out.mkdir(parents=True, exist_ok=True)
+
+    with (out / "trade.csv").open("w") as fh:
+        fh.write("# CHARM, M-075, from STE_14 (Kronenberg 2007). E and M are "
+                 "GROSS and both can be positive.\n")
+        fh.write("sector_code,X,Z_S,D,B,V,E,M,CH,eps\n")
+        for i, c in enumerate(table.sector_codes):
+            fh.write(f"{c},{res.X[i]:.6f},{res.Z_S[i]:.6f},{res.D[i]:.6f},"
+                     f"{res.B[i]:.6f},{res.V[i]:.6f},{res.E[i]:.6f},"
+                     f"{res.M[i]:.6f},{res.CH[i]:.6f},{res.eps[i]:.6f}\n")
+
+    # SEPARATE FROM trade.csv ON PURPOSE. Merged into one file a reader comes
+    # to believe `eps` was measured for the region. It was measured for the
+    # NATION and carried across, which is the method's central assumption and
+    # the thing all four caveats exist to keep in view.
+    E_n, M_n, D_n = table.trade_vectors()
+    V_n, B_n = E_n + M_n, E_n - M_n
+    with (out / "heterogeneity.csv").open("w") as fh:
+        fh.write("# the NATIONAL heterogeneity, which this run transported to "
+                 "the region unchanged.\n")
+        fh.write("sector_code,eps,V,B,CH,scale\n")
+        scale = table.X + table.Z.sum(axis=1) + D_n
+        for i, c in enumerate(table.sector_codes):
+            fh.write(f"{c},{res.eps[i]:.6f},{V_n[i]:.6f},{B_n[i]:.6f},"
+                     f"{V_n[i] - abs(B_n[i]):.6f},{scale[i]:.6f}\n")
+
+    resid = res.market_clearing_residue
+    ch_share = (float(res.CH.sum() / res.V.sum() * 100)
+                if res.V.sum() else float("nan"))
+    lines = [
+        "# A region's gross two-way trade, estimated with CHARM",
+        "",
+        f"From `{national_name}` ({table.country} {table.year}, "
+        f"{table.n} products, {table.unit}), the TOTAL-FLOW table.",
+        f"Declared by: {table.trade.declared_by}",
+        f"Regional employment from `{activity_name}`, "
+        f"a {res.employment_share * 100:.2f} % share of the national total.",
+        "",
+        "## What this is known to get wrong",
+        "",
+        "*Printed because the method has measured limitations and a number "
+        "without them invites more confidence than it has earned. "
+        "`CORE_036` p. 35.*",
+        "",
+    ] + [f"- {c.lstrip('- ')}" if c.startswith("  - ") else c
+         for c in res.caveats] + ([""] + res.flags if res.flags else []) + [
+        "",
+        "## What was written",
+        "",
+        "- `trade.csv` — output, intermediate sales, domestic final use, the "
+        "balance, the volume, exports, imports, cross-hauling and the "
+        "heterogeneity, by product. This file IS the result.",
+        "- `heterogeneity.csv` — the same quantities for the NATION, which is "
+        "where `eps` was measured. Kept separate so nothing reads as though "
+        "it had been measured for the region.",
+        "",
+        "There is no `regional_table.xlsx`, no `coefficients.csv` and no "
+        "`implicit_imports.csv` here, and that is not an omission. CHARM "
+        "estimates trade, not a technology: the regional coefficient matrix it "
+        "would imply is the nation's by assumption, and a table with one "
+        "residual final-demand column would net exports against imports and "
+        "destroy the one thing this method computes. Use `--regionalise` for a "
+        "regional table.",
+        "",
+        f"Cross-hauling is {ch_share:.1f} % of estimated trade volume. The "
+        f"market-clearing residue of eq. (13) is at most "
+        f"{float(np.abs(resid).max()):,.6f} across {table.n} products — the "
+        f"source's own consistency check, and this run's arithmetic rather "
+        f"than its assumptions.",
+    ]
+    (out / "report.md").write_text("\n".join(lines) + "\n")
+    write_json({"method": "CHARM",
+                "national_table": str(national_name),
+                "table_kind_declared_by": table.trade.declared_by,
+                "indirect_allocation": bool(table.trade.indirect_allocation),
+                "activity_file": str(activity_name),
+                "employment_share": float(res.employment_share),
+                "eps_source": "national, transported",
+                "cross_hauling_share_pct": ch_share,
+                "market_clearing_residue_max": float(np.abs(resid).max()),
+                "caveats": res.caveats, "flags": res.flags},
+               out / "assumption_ledger.json")
+
     print("\n".join(lines))
     print(f"\nWritten to {out}")
     return 0

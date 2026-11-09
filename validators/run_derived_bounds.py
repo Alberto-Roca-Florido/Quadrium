@@ -22,7 +22,7 @@ contradicted itself, a widening that broke something. Nobody had ever swept.
 
 WHAT A SWEEP HAS TO SEPARATE
 ------------------------------
-The engine holds 21 comparisons against a hard constant, and most are fine. The
+The engine holds 22 comparisons against a hard constant, and most are fine. The
 question is not "is there a constant" but "does this constant decide anything":
 
     GUARD    protects a division or a degenerate branch. The value carries no
@@ -128,6 +128,15 @@ CLASSIFIED = {
     ("disaggregation.py", "share"): "guard: denominator",
     ("disaggregation.py", "beta"): "guard: the 1/(1-d) singularity",
     ("eurostat.py", "tiling"): "verdict, FIXED: uses _rounding_tol",
+    # Added 2026-11-08 with `TradeBlock`. It decides a REFUSAL a user sees --
+    # a Y column declared as imports whose entries are positive -- so it is a
+    # verdict and not a denominator. Measured rather than assumed: all TWELVE
+    # held total-flow tables (the INE's and eleven Eurostat cubes) reach
+    # exactly -0.0 as the largest entry of their imports column, so the slack
+    # is never used and a strict `> 0` would pass every one of them. The 1e-6
+    # exists only to absorb a rounding positive that no held table produces.
+    ("models.py", "imports_column"): "verdict: not exercised by any held "
+                                     "table — all 12 reach exactly -0.0",
     ("models.py", "moving"): "guard: a flat window, on percentages",
     ("models.py", "per"): "guard: a flat window, on percentages",
     ("models.py", "stranded"): "verdict: not exercised by any held table",
@@ -175,7 +184,7 @@ def main() -> int:
     print(f"    {len(found)} comparison(s) against a hard constant, over "
           f"{len({f for f, _, _ in found})} modules")
     # Exact, not a range: the point of the count is that it trips.
-    EXPECTED = 21
+    EXPECTED = 22   # 21 until 2026-11-08; `TradeBlock`'s sign test is the 22nd
     check("the sweep still matches the code",
           len(found) == EXPECTED,
           f"{len(found)} found against {EXPECTED} expected, and "

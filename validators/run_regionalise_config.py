@@ -90,9 +90,16 @@ def main_() -> int:
     print(__doc__.strip().split("Run:")[0].rstrip())
     print("\n" + "=" * 78)
 
-    check("a national table to regionalise", ES.exists(), ES.name)
     if not ES.exists():
-        return 1
+        print(f"\nNothing was checked: the national table is absent — {ES}")
+        print("\n  This file exists to prove the two doors agree, and that "
+              "needs both doors run")
+        print("  against a real table. With none there is nothing to compare. "
+              "Exit 3 says")
+        print("  CHECKED NOTHING, which check.sh names separately and never "
+              "counts as a pass.")
+        return 3
+    check("a national table to regionalise", ES.exists(), ES.name)
 
     tmp = Path(tempfile.mkdtemp(prefix="quadrium_regcfg_"))
     try:

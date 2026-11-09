@@ -244,9 +244,13 @@ def main() -> int:
               "measurement did not,")
         print("  and a run that checked only the arithmetic is not a run that "
               "checked the method.")
+        if FAIL == 0:
+            # The line check.sh parses, so the suite can name the reason
+            # instead of printing the skip with a blank beside it.
+            print("Nothing was checked: the measurement needs both published "
+                  "tables.")
         return 3 if FAIL == 0 else 1
 
-    from run_charm_heterogeneity import catalan_imports
     from run_es_cat_bridge import to_catalan_products as fold
 
     from quadrium.io_loader import load_idescat_mioc, load_ine_tio
@@ -254,15 +258,19 @@ def main() -> int:
     es = load_ine_tio(ES, variant="total")
     cat = load_idescat_mioc(CAT)
 
-    e_es = fold(es.Y[:, 5] + es.Y[:, 6])
-    m_es = fold(-es.Y[:, 7])
+    # The three vectors come off the loader's own declaration now. Until
+    # 2026-11-08 they were `Y[:, 5] + Y[:, 6]`, `-Y[:, 7]` and `Y[:, 0:5]`
+    # written in here, one set of column numbers per country, and the Catalan
+    # imports came from a derivation held in a sibling validator that does not
+    # travel to the public tree. run_trade_block.py checks that the
+    # declaration reproduces those indices to zero.
+    E_es, M_es, D_es = es.trade_vectors()
+    e_es, m_es, d_es = fold(E_es), fold(M_es), fold(D_es)
     x_es = fold(es.X)
     z_es = fold(es.Z.sum(1))
-    d_es = fold(es.Y[:, 0:5].sum(1))
 
-    imp = catalan_imports(CAT, cat.n)
-    e_ca = cat.Y[:, 4] + cat.Y[:, 5]
-    m_ca = imp["spain"] + imp["world"]
+    e_ca = cat.exports_by_product()
+    m_ca = cat.imports_by_product()
     x_ca = cat.X
 
     check("both tables loaded and fold onto the same 63 products",
@@ -366,14 +374,47 @@ def main() -> int:
           cross_charm > 0 and float(np.minimum(cb_e, cb_m).sum()) == 0.0,
           f"CHARM {cross_charm:,.0f} against a published {cross_true:,.0f} "
           f"({cross_charm / cross_true * 100:.1f} % of it). The CB's is zero "
-          f"by construction, in every one of the 63 products")
+          f"by construction, in 63 of 63 products")
+
+    # THE HEADLINE FIGURES, PINNED AS LITERALS, and that is the point of
+    # writing them out again rather than only printing them.
+    #
+    # `docs/GUIDE.md` §10 quotes these to a reader choosing between this and
+    # the location quotient family, and `run_report_claims.py` checks a guide
+    # figure by looking for it IN THE SOURCE of the validator its section
+    # names. A figure this file only ever computed at run time could not be
+    # found there, so the guide's copy of it was unverifiable -- it would have
+    # drifted in silence, which is the exact failure that validator exists
+    # against. Written here, a measurement that moves fails this check and the
+    # guide is what gets corrected.
+    short_pct = (1 - cb_vol / true_vol) * 100
+    recovered_pct = (ch_vol - cb_vol) / max(true_vol - cb_vol, 1e-9) * 100
+    cross_pct = cross_charm / cross_true * 100
+    for label, got, want in (
+            ("the CB is 64.8 % short of the published total", short_pct, 64.8),
+            ("CHARM recovers 68.6 % of that shortfall", recovered_pct, 68.6),
+            ("and produces 65.1 % of the published cross-hauling",
+             cross_pct, 65.1),
+            ("CHARM itself is still 20.4 % short of the published total",
+             (1 - ch_vol / true_vol) * 100, 20.4)):
+        check(label, abs(got - want) <= 0.05,
+              f"{got:.1f} % against the {want} % the guide quotes — half the "
+              f"last printed digit, the same rule run_report_claims.py "
+              f"applies to a sentence")
+    check("the published total and both estimates are these",
+          abs(true_vol - 275062) < 1 and abs(cb_vol - 96954) < 1
+          and abs(ch_vol - 219056) < 1,
+          f"published {true_vol:,.0f}, CB {cb_vol:,.0f}, CHARM {ch_vol:,.0f} "
+          f"million EUR — pinned so the guide's table cannot outlive them")
 
     print("\n  WHAT THE RUN PRINTS WITHOUT BEING ASKED")
     print(res.report())
     check("the measured cost of the transported eps is printed, unasked",
-          "0.886" in res.report() and "1.40" in res.report(),
+          "0.886" in res.report() and "1.40" in res.report()
+          and "47 of 63" in res.report() and "0.117" in res.report(),
           "M-075 and regionalise.py follow the same rule: CORE_036 p. 35, no "
-          "refuge in a mechanically produced figure")
+          "refuge in a mechanically produced figure — and the guide quotes all "
+          "four, so they are asserted here rather than merely printed")
 
     print("\n" + "=" * 78)
     print(f"  {RAN} checks, {FAIL} failed")

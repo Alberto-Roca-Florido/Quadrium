@@ -93,6 +93,21 @@ AUDITED = (ROOT / "src" / "quadrium" / "reporting.py",
 VDIR = Path(__file__).resolve().parent
 FAIL: list[str] = []
 
+
+def cited_source(name: str) -> str | None:
+    """The text of a cited validator, or None when it is not in this tree.
+
+    A CITATION THAT DOES NOT RESOLVE IS ALREADY A REPORTED FAILURE, and
+    reading it anyway turned that report into a traceback. In the public tree,
+    where a guide citation pointed at a PRIVATE_ONLY validator, this file
+    printed its FAIL and then died on the open -- so every check after it
+    never ran and the output ended in a stack trace instead of a verdict. The
+    three readers below skip a missing file instead: the figure then finds no
+    source, which is exactly what it has.
+    """
+    p = VDIR / name
+    return p.read_text() if p.exists() else None
+
 # Numbers that are not measurements: cut points, alphas, section numbers and the
 # like, plus the years and paragraph references that belong to the sources.
 NOT_A_MEASUREMENT = re.compile(r"^(0|1|2|3|4|5|18|19|20|65|89|100|1000)$")
@@ -233,7 +248,9 @@ def main() -> int:
     for name, lineno, raw, cites in pairs:
         ok = False
         for c in cites:
-            src = (VDIR / c).read_text()
+            src = cited_source(c)
+            if src is None:
+                continue
             if " of " in raw:
                 a, b = raw.split(" of ")
                 ok = (raw in src) or (f"{a} of {b}" in src.replace(",", ""))
@@ -245,6 +262,105 @@ def main() -> int:
                 break
         if not ok:
             bad.append((name, lineno, raw, ", ".join(cites)))
+
+    # WHAT `bad` IS, AND WHY IT DID NOT EXIST UNTIL 2026-11-08.
+    #
+    # The list above was built and then read by nothing. The substance check
+    # -- does the figure still match the validator that measured it -- was
+    # dead code for as long as it existed, so this file verified that every
+    # claim NAMES a source and never that the source still carries it. Found
+    # by planting a false figure in the guide (78.6 % for 68.6 %) and watching
+    # the run pass.
+    #
+    # It does not FAIL on them, and that is a measurement rather than a
+    # kindness: a validator that computes its figure at run time has it in no
+    # literal anywhere, so there is nothing in its source to match and the
+    # mismatch says nothing about whether the figure is right. 23 of 138 are
+    # that. The fix for one of them is to pin the figure as a literal in the
+    # validator -- `run_charm.py` does, which is why none of GUIDE.md §10's
+    # figures is on this list -- and doing that for the remaining 23 is work
+    # with a decision in front of it, not a line of code.
+    #
+    # So the gap is printed with its denominator. An unverifiable figure that
+    # nobody has counted reads exactly like a verified one.
+    print()
+    print(f"    {len(pairs) - len(bad)} of {len(pairs)} cited figure(s) were "
+          f"found in the source of a validator their section names;")
+    print(f"    coverage: {len(pairs) - len(bad)} of {len(pairs)} cited "
+          f"figures verified against a validator's source, {len(bad)} not "
+          f"({100 * (len(pairs) - len(bad)) / max(len(pairs), 1):.1f} %)")
+    if bad:
+        print()
+        print("    figures whose cited validator does not carry them as a "
+              "literal — computed at run time, so this cannot tell whether "
+              "they have drifted:")
+        for name, lineno, raw, cites in bad[:14]:
+            print(f"      {name}:{lineno}  '{raw}'  cites {cites}")
+        if len(bad) > 14:
+            print(f"      … and {len(bad) - 14} more")
+    # TWO RATCHETS, so that counting the gap is not the same as accepting it.
+    #
+    # `reporting.py` is the engine's OWN report, and its figures are literals
+    # in the validators that measured them: 0 of its claims are unverifiable
+    # today. So a mismatch there is a drift and fails. That is the failure
+    # this file was written for -- six figures stale in a user's report for
+    # hours -- and until now nothing would have caught it.
+    #
+    # `docs/GUIDE.md` carries 23 figures their validators compute at run time
+    # and hold in no literal. Those are counted, listed, and FLOORED: the
+    # number may fall and may not rise, so §10's figures could be pinned
+    # (run_charm.py does) without the next section's being left unpinned
+    # quietly. Lowering this floor to make a run pass is the one thing it is
+    # for.
+    GUIDE_UNVERIFIABLE_FLOOR = 23
+    report_bad = [b for b in bad if b[0].endswith(".py")]
+    guide_bad = [b for b in bad if b[0].endswith(".md")]
+    check("the engine's own report still matches what measured it",
+          not report_bad,
+          "; ".join(f"{a}:{b} '{c}' cites {d}" for a, b, c, d in report_bad)
+          if report_bad else
+          f"all {len([x for x in pairs if x[0].endswith('.py')])} of "
+          f"reporting.py's cited figures are literals in their validator, so "
+          f"a drift is a failure here and not a note")
+    check("and the guide's unverifiable figures have not increased",
+          len(guide_bad) <= GUIDE_UNVERIFIABLE_FLOOR,
+          f"{len(guide_bad)} against a floor of {GUIDE_UNVERIFIABLE_FLOOR}. "
+          f"Pin a figure as a literal in the validator that measures it and "
+          f"this falls; add a figure nothing carries and it rises. Never "
+          f"raise the floor to make a run pass")
+
+    # AND THAT THE MATCHER DISCRIMINATES, which is the part that makes the
+    # 115 mean anything. The first version of this check asserted
+    # `verified + unverifiable == paired`, which is true by construction and
+    # was therefore a second vacuous pass written while removing the first.
+    #
+    # This takes each verified claim, moves it by ten printed digits, and
+    # requires that the moved value is NOT found in the same source. A matcher
+    # that accepted anything would verify all 138 and this would catch it.
+    discriminates = ok_count = 0
+    for name, lineno, raw, cites in pairs:
+        if " of " in raw or raw in [b[2] for b in bad]:
+            continue
+        ok_count += 1
+        shifted = float(raw.replace(",", "")) + 10 * printed_tolerance(raw) * 2
+        hit = False
+        for c in cites:
+            src = cited_source(c)
+            if src is None:
+                continue
+            if any(abs(v - shifted) <= printed_tolerance(raw)
+                   for v in numbers_in(src)):
+                hit = True
+                break
+        if not hit:
+            discriminates += 1
+    check("and the matcher rejects a figure that has moved",
+          ok_count and discriminates / ok_count >= 0.75,
+          f"{discriminates} of {ok_count} verified figures stop matching once "
+          f"shifted by ten printed digits. Some still match because a "
+          f"validator's source holds hundreds of numbers — that is why the "
+          f"luck measurement below exists — but a matcher that accepted "
+          f"anything would score 0 here and verify all {len(pairs)}")
 
     print()
     if uncited:
@@ -265,7 +381,10 @@ def main() -> int:
     grid = [x / 10 for x in range(0, 1001)]
     rates = []
     for c in sorted(all_cited):
-        nums = numbers_in((VDIR / c).read_text())
+        src = cited_source(c)
+        if src is None:
+            continue
+        nums = numbers_in(src)
         rates.append((c, sum(1 for g in grid
                              if any(abs(n - g) <= 0.05 for n in nums))
                       / len(grid)))

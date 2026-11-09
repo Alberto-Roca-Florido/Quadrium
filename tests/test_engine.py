@@ -6325,3 +6325,110 @@ def test_the_mixed_model_holds_to_its_source_and_its_two_ends():
             check(f"refuses {label}", True)
         else:
             check(f"refuses {label}", False, "it solved")
+
+
+# ---------------------------------------------------------------------------
+# The trade declaration: which part of a table is exports, imports by product
+# and final use excluding exports. Added 2026-11-08 with `TradeBlock`.
+# ---------------------------------------------------------------------------
+
+def _trade_table(Y, Y_labels, trade=None, table_id="T"):
+    """A two-sector table that balances, with whatever Y it is given."""
+    from quadrium.models import IOTable
+    Z = np.array([[1.0, 2.0], [3.0, 4.0]])
+    Y = np.asarray(Y, float)
+    X = Z.sum(axis=1) + Y.sum(axis=1)
+    VA = (X - Z.sum(axis=0)).reshape(1, 2)
+    return IOTable(table_id=table_id, country="XX", year=2021,
+                   unit="million EUR", classification="NACE Rev.2",
+                   sector_codes=["A", "B"], sector_labels=["A", "B"],
+                   Z=Z, Y=Y, Y_labels=list(Y_labels), VA=VA,
+                   VA_labels=["VA"], X=X, source="unit test", trade=trade)
+
+
+# domestic, domestic, exports, imports-as-a-negative-column
+_Y4 = [[10.0, 5.0, 7.0, -4.0], [20.0, 5.0, 8.0, -6.0]]
+_L4 = ["households", "government", "exports", "imports"]
+
+
+def _block(**kw):
+    from quadrium.models import TradeBlock
+    base = dict(export_columns=[2], domestic_columns=[0, 1],
+                indirect_allocation=True, declared_by="the unit test",
+                imports_column=3)
+    base.update(kw)
+    return TradeBlock(**base)
+
+
+def test_the_trade_declaration_reads_back_and_refuses():
+    """A declaration that partitions Y, and refusals for the ways it cannot.
+
+    The accessors exist so that `E`, `M` and `D` can be formed from any
+    loaded table instead of from column numbers written in by hand per
+    country. What makes that safe is not the accessor but the partition: a
+    column nobody classified is a column left out of the commodity balance,
+    and a balance short by a column of final demand still looks like one.
+    """
+    t = _trade_table(_Y4, _L4, _block())
+    E, M, D = t.trade_vectors()
+    check("exports come back as declared", list(E) == [7.0, 8.0], f"{list(E)}")
+    check("imports come back POSITIVE from a negative column",
+          list(M) == [4.0, 6.0], f"{list(M)}")
+    check("domestic final use excludes exports and imports",
+          list(D) == [15.0, 25.0], f"{list(D)}")
+    check("and the three named accessors agree with it",
+          list(t.exports_by_product()) == list(E)
+          and list(t.imports_by_product()) == list(M)
+          and list(t.domestic_final_use()) == list(D))
+    # The identity the declaration has to satisfy for a total-flow table:
+    # supply from home plus imports equals intermediate sales plus final use.
+    lhs = t.Z.sum(axis=1) + D + E - M
+    check("and the product balance closes on the vectors it hands back",
+          float(np.abs(lhs - t.X).max()) < 1e-12,
+          f"worst {float(np.abs(lhs - t.X).max()):.2e}")
+
+    # -- the refusals
+    def refuses(label, fn, fragment):
+        try:
+            fn()
+        except ValueError as exc:
+            ok = fragment in str(exc)
+            check(f"refuses {label}", ok,
+                  "" if ok else f"it refused, but for {str(exc)[:70]!r}")
+        else:
+            check(f"refuses {label}", False, "it accepted")
+
+    refuses("a Y column nobody classified",
+            lambda: _trade_table(_Y4, _L4, _block(domestic_columns=[0])),
+            "unclassified")
+    refuses("a POSITIVE column declared as imports",
+            lambda: _trade_table(_Y4, _L4,
+                                 _block(export_columns=[3],
+                                        domestic_columns=[0, 1],
+                                        imports_column=2)),
+            "which is")
+    refuses("a negative imports_vector",
+            lambda: _block(imports_column=None,
+                           imports_vector=[1.0, -2.0]),
+            "negative at index 1")
+    refuses("imports given twice, as a column and as a vector",
+            lambda: _block(imports_vector=[1.0, 2.0]),
+            "not both")
+    refuses("one column declared both export and domestic",
+            lambda: _block(domestic_columns=[0, 1, 2]),
+            "BOTH export and domestic")
+    refuses("a declaration that does not say where it came from",
+            lambda: _block(declared_by="  "),
+            "where it was read from")
+    refuses("a table that was never asked",
+            lambda: _trade_table(_Y4, _L4, None).trade_vectors(),
+            "NOT SPECIFIED")
+    # Imports by PURCHASING INDUSTRY are a different quantity, so a table
+    # that only has those must refuse rather than hand back a zero.
+    refuses("a table whose imports are not by product",
+            lambda: _trade_table(
+                [[10.0, 5.0, 7.0], [20.0, 5.0, 8.0]],
+                ["households", "government", "exports"],
+                _block(imports_column=None,
+                       indirect_allocation=False)).trade_vectors(),
+            "BY PRODUCT")

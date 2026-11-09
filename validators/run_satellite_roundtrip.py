@@ -63,7 +63,7 @@ def main():
     if not ine.exists():
         print(f"    -- {ine.name} is absent.")
         print("\n" + "=" * 78)
-        print("Nothing checked here.")
+        print(f"Nothing was checked: {ine.name} is absent.")
         return NOTHING_CHECKED
 
     import es_hosteleria as ex
@@ -90,7 +90,8 @@ def main():
         path = write_interchange_xlsx(res.table, Path(td) / "t.xlsx",
                                       derived_from="round trip check")
         if path is None:
-            print("    -- openpyxl is absent, so nothing can be written.")
+            print("Nothing was checked: openpyxl is absent, so the "
+                  "round trip cannot be written at all.")
             return NOTHING_CHECKED
         back = load_io_table(path)
 

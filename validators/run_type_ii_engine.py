@@ -53,7 +53,7 @@ def main():
     if not FIXTURE.exists():
         print(f"    -- {FIXTURE.name} is absent.")
         print("\n" + "=" * 78)
-        print("Nothing checked here.")
+        print(f"Nothing was checked: {FIXTURE.name} is absent.")
         return NOTHING_CHECKED
 
     from quadrium.config import ConfigError, _type_ii_spec

@@ -1507,10 +1507,90 @@ still the archive's, and nobody has measured it.
 
 ---
 
-## 10. What it will not do
+## 10. Estimate a region's two-way trade
 
-- **Estimate trade between regions.** Section 9 gives you one region against
-  its country; the origin-destination flows between regions are not modelled.
+Section 9 estimates a region's **table**. This estimates a region's **trade**,
+and it is a different thing: every other non-survey method here gives you *net*
+trade and puts it on one side, so a product is either exported or imported. In
+real data it is usually both at once, and a net view erases the overlap by
+construction: the commodity balance alone gives cross-hauling of exactly **zero
+in 63 of 63** of Catalonia's products, against a published figure that is not
+zero (`validators/run_charm.py`).
+
+CHARM keeps the balance and estimates the **volume** separately, so both
+directions can be positive. `M-075`, from Kronenberg's own 2007 preprint.
+
+```bash
+quadrium --charm employment.csv --national cne_tio_21.xlsx \
+         --national-kind ine --outputs out --name catalonia
+```
+
+or, in the workbook, a `charm` sheet with one key, `activity_path`.
+`validators/run_charm_doors.py` holds that the two doors give identical
+numbers.
+
+**The table is a different table, and this is the sentence worth reading
+twice.** Section 9 needs the **domestic** table. This needs the **total-flow**
+one, where imported inputs are distributed across the intermediate matrix. They
+are not interchangeable: one gives you the effect on domestic output and the
+other the effect on supply, so choosing between section 9 and this one is
+choosing which multiplier you want, not just which estimator. In the workbook
+that is `table_kind: ine_total`, not `ine_interior`, and `eurostat` with
+`eurostat_variant: total`. A domestic table is **refused** rather than run,
+because it would return numbers and they would be the wrong ones.
+
+`employment.csv` is three columns, `sector_code,regional,national`, and the
+third is **required here**: equation (30) reads the pair as the region's share
+of national employment, sector by sector, and if it were missing the engine
+would put the table's own output there instead — which assumes a thing nobody
+chose.
+
+You get `trade.csv` — output, intermediate sales, domestic final use, the
+balance, the volume, exports, imports, cross-hauling and the heterogeneity, by
+product — and `heterogeneity.csv`, the same quantities for the country, kept in
+its own file so nothing reads as though it had been measured for the region.
+There is no regional table and no coefficient matrix: CHARM estimates trade,
+not a technology.
+
+### What this is known to get wrong
+
+Measured on Catalonia against Spain's own table, with the published regional
+output used in place of the employment proxy so the error is a **floor** and
+not a best case:
+
+| | estimated | of a published 275,062 M EUR |
+|---|---:|---:|
+| commodity balance | 96,954 | **64.8 % short** |
+| CHARM | 219,056 | 20.4 % short |
+
+CHARM recovers **68.6 %** of the trade the commodity balance leaves out, and
+**65.1 %** of the published cross-hauling — where the commodity balance
+produces cross-hauling of exactly zero in **63 of 63** products, by
+construction rather than by accident.
+
+The method's own weak point is the heterogeneity. It is measured for the
+country and carried to the region unchanged, and that transport carries the
+**ordering** of products but not the **level**: rank correlation 0.886, the
+region's mean 1.40 times the nation's, under-predicting in **47 of 63**
+products, mean absolute error 0.117 against a national mean of 0.217. The cause
+is structural and a finer classification does not reduce it — on international
+trade alone the region averages 0.85 of the nation, and the excess is trade with
+the rest of the country, which is internal to the nation and external to the
+region.
+
+Every run prints all of that, and there is no way to suppress it.
+`validators/run_charm.py` holds the figures.
+
+---
+
+## 11. What it will not do
+
+- **Say WHERE a region's trade goes.** Section 10 estimates how much a region
+  ships out and takes in, both at once — the gross two-way flow a location
+  quotient cannot represent. It still does not say where those shipments go or
+  come from: CHARM gives a region's trade with everywhere else as one number
+  per product, it does not split the rest of the country from abroad, and
+  cross-hauling between two named regions is outside it entirely.
 - **Find your environmental or employment figures for you, except in one
   case.** Any quantity per sector — jobs, emissions, water — can be attached in
   the `satellites` sheet (section 4), and the report gives its direct and total

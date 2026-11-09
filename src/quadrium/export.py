@@ -400,6 +400,45 @@ def _write_interchange_sheets(wb, t, *, table_id: str,
         meta.append(("type_ii_income_rows",
                      "; ".join(t.type_ii.get("income_rows", []))))
         meta.append(("type_ii_household_column", t.type_ii.get("household")))
+    # THE TRADE DECLARATION, BY LABEL AND NOT BY INDEX.
+    #
+    # Same reason `type_ii` carries labels: a column order that changes moves
+    # an index silently, and a table written by this engine and read back must
+    # not come back saying a different column is exports. A label that is not
+    # in `Y_labels`, or that is in it twice, is refused on READ rather than
+    # resolved to a guess.
+    #
+    # Without these rows a table exported from a declaring loader comes back
+    # NOT SPECIFIED, which is honest but means a CHARM run cannot be chained
+    # after anything this engine writes.
+    if t.trade is not None:
+        tb = t.trade
+        lab = [str(y) for y in t.Y_labels]
+        # ONE ROW PER LABEL, not one row of labels joined by a separator.
+        #
+        # The first draft joined them with `; ` and refused to write a label
+        # that contained one. That refusal fired on the INE's own residual
+        # column -- "Discrepancia estadística (RESIDUAL, calculada por el
+        # cargador; el INE no la publica)" -- and so broke writing a table
+        # that had been writable before, which is a worse defect than the one
+        # it was guarding against. A final-demand label is prose from a
+        # statistical office and no character can be reserved in it.
+        for i, c in enumerate(tb.export_columns, start=1):
+            meta.append((f"trade_export_{i}", lab[c]))
+        for i, c in enumerate(tb.domestic_columns, start=1):
+            meta.append((f"trade_domestic_{i}", lab[c]))
+        for i, c in enumerate(tb.other_columns, start=1):
+            meta.append((f"trade_other_{i}", lab[c]))
+        if tb.imports_column is not None:
+            meta.append(("trade_imports_column", lab[tb.imports_column]))
+        if tb.imports_vector is not None:
+            # Numbers, so a separator IS safe here -- and 65 metadata rows of
+            # floats would be unreadable where one row is merely long.
+            meta.append(("trade_imports",
+                         "; ".join(f"{v!r}" for v in tb.imports_vector)))
+        meta.append(("indirect_allocation",
+                     "yes" if tb.indirect_allocation else "no"))
+        meta.append(("trade_declared_by", tb.declared_by))
     for i, line in enumerate(t.lineage, start=1):
         meta.append((f"lineage_{i}", line))
     meta.append((

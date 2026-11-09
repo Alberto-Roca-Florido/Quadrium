@@ -56,7 +56,7 @@ import numpy as np
 
 from .precision import assertable_tolerance, printed_decimals as _pd
 
-from .models import IOTable, SupplyUseTables
+from .models import IOTable, SupplyUseTables, TradeBlock
 
 API = ("https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/"
        "{dataset}?format=JSON&lang=EN")
@@ -784,6 +784,35 @@ def load_iot(path: Path | str, variant: str = "domestic") -> IOTable:
             f"  No tolerance reconciles two published numbers, and every "
             f"consumer of an `IOTable` is entitled to that identity.")
 
+    # WHICH PART OF THIS Y IS TRADE. The codes are Eurostat's own ESA ones,
+    # chosen above from what the country actually populates, so `P6*` and
+    # `P7_NEG` are a rule about the source rather than a guess about a label.
+    # That is why the declaration is made HERE: `_FD_ALTERNATIVES` picked the
+    # set at run time and a fixed table of column indices could not.
+    #
+    # The IMPORTS variant is left undeclared on purpose. Its `Z` IS the imports
+    # matrix, so an export column of it is not the economy's exports, and NOT
+    # SPECIFIED is the true answer rather than a plausible one.
+    _trade = None
+    if variant in ("total", "domestic"):
+        _exp = [i for i, c in enumerate(fd) if c.startswith("P6")]
+        _imp_col = fd.index("P7_NEG") if "P7_NEG" in fd else None
+        _trade = TradeBlock(
+            export_columns=_exp,
+            domestic_columns=[i for i, c in enumerate(fd)
+                              if not c.startswith("P6") and c != "P7_NEG"],
+            imports_column=_imp_col,
+            # A TOTAL table distributes imports across `Z`; a DOMESTIC one
+            # keeps them out of it and carries them as the `IMP` row of `VA`,
+            # which is imports by PURCHASING industry and not by product.
+            indirect_allocation=(variant == "total"),
+            declared_by=(f"Eurostat {variant} table, final-demand codes "
+                         f"{fd}; exports are "
+                         f"{[c for c in fd if c.startswith('P6')]}"
+                         + (", imports the DERIVED negative P7_NEG column "
+                            "this loader builds from IMP/TU"
+                            if _imp_col is not None else "")))
+
     geo = cube.fixed.get("geo", "?")
     year = int(cube.fixed.get("time", 0))
     labels = cube.labels[ava_dim]
@@ -803,6 +832,7 @@ def load_iot(path: Path | str, variant: str = "domestic") -> IOTable:
         Y_labels=["Imports of goods and services (negative column, DERIVED)"
                   if f == "P7_NEG" else f for f in fd], VA=VA,
         VA_labels=[_LABELS.get(r, r) for r in VA_names], X=X,
+        trade=_trade,
         source=f"Eurostat, {cube.doc.get('label', 'naio_10')} ({path.name})",
         retrieved_at=datetime.now(timezone.utc),
         notes=(f"{axis}, {variant} use, basic prices. The "
