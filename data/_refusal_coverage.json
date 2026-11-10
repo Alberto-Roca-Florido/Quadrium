@@ -1,6 +1,6 @@
 {
  "_note": "Which of the engine's own refusals anything in the suite has ever reached. Re-taken by library/tools/sweep_refusals.py, which patches each quadrium exception type to record its raise site and runs every validator and the unit tests as separate processes. Sites are recorded as file:line and translated to file::function keys through the same syntax-tree pass run_refusal_coverage.py uses.",
- "taken": "2026-11-09",
+ "taken": "2026-11-10",
  "n_sites": 240,
  "fired": [
   "acquire.py::_open::answered HTTP .",
@@ -15,6 +15,8 @@
   "balancing.py::balance::locked cells were requested with GRAS. GRAS as speci",
   "balancing.py::ras",
   "balancing.py::select_method",
+  "cli.py::_load_total_flow::the Catalan workbook's intermediate matrix is the 't",
+  "cli.py::_load_total_flow::the ONS publishes its analytical table at DOMESTIC u",
   "config.py::_employment_cell",
   "config.py::_eurostat_cache_path::eurostat_dataset is neither one of nor a naio_10_* c",
   "config.py::_eurostat_cache_path::eurostat_geo is . It must be a two-letter country co",
@@ -524,5 +526,5 @@
  },
  "_classification": "What each refusal judges. Keyed by the FUNCTION it sits in, with a few identified by a distinctive fragment of their own message where one function judges both a caller's arguments and a table's contents. NOT by file:line -- that version silently re-labelled 38 sites when the Catalan loader was inserted above them. `workbook` the user's own spreadsheet, `source` a file from a statistical office, `scenario` what they asked for, `upstream` a failure re-raised with guidance, `caller` an internal API contract, `data` the numbers themselves.",
  "key_format": "file.py::function, plus a fragment of the message when one function raises more than once. NOT file:line -- editing a module shifts every line below the edit, which silently re-labelled 38 sites once and broke this check again on 2026-09-01.",
- "floor": 222
+ "floor": 224
 }

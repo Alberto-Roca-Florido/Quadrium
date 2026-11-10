@@ -251,6 +251,35 @@ def main_() -> int:
                   "declaration is what catches it, and the refusal names who "
                   "declared it")
 
+        # THE TWO KINDS THE FLAGS DOOR REFUSES BY NAME, which nothing
+        # exercised until now. The refusal sweep of 2026-11-09 left `cli.py`
+        # at 0 of 3, the engine's least covered module, and two of those three
+        # are reachable by a user: `--national-kind uk` and `idescat` name an
+        # office that publishes at DOMESTIC use and stop. The third is a
+        # `kind` argparse does not allow, classified `caller` for that reason
+        # and left without a case on purpose.
+        #
+        # Neither needs a table of that country: `_load_total_flow` raises on
+        # the kind BEFORE it reads any path, and nothing validates --national
+        # before it. The Spanish file is passed anyway, so the check can only
+        # pass because of the kind and not because a path was missing.
+        for kind, word in (("uk", "ONS"), ("idescat", "ts Cat")):
+            code, _, err = run(["--charm", str(act), "--national", str(ES),
+                                "--national-kind", kind,
+                                "--outputs", str(tmp)])
+            # The detail says WHICH part is missing. Written first as
+            # "exit {code}; names the publication" on the code alone, it
+            # described a success while the check failed -- the refusal
+            # returned 2 without naming the office at all.
+            absent = [w for w in ("DOMESTIC", word, "TOTAL-FLOW")
+                      if w not in err]
+            check(f"and refuses --national-kind {kind} by name, not by crash",
+                  code == 2 and not absent,
+                  f"exit {code}, and the refusal names the publication rather "
+                  f"than the loader" if code == 2 and not absent
+                  else f"exit {code}; missing from stderr: "
+                       f"{', '.join(absent) or 'nothing'}")
+
         for kind, word in (("uk_analytical", "uk"), ("eu_mrio", "eu_mrio")):
             code, _, err = run([str(workbook(tmp / f"{kind}.xlsx",
                                              rows=[("activity_path",
