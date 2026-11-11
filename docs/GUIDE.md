@@ -1418,11 +1418,24 @@ takes `--delta` and **refuses to guess one**. Measured across ten regions in two
 countries it runs from 0.14 to 0.60 with a median of 0.26, so a default would be
 a guess wearing a number.
 
-You get the regional coefficients, the interregional imports the scaling
-implies, a report and an assumption ledger, written to a folder under
-`--outputs` named after the method — or after `--name`, if you would rather
-choose it. And you get, printed whether you
-asked or not, what the method is known to get wrong:
+You get four files, written to a folder under `--outputs` named after the
+method — or after `--name`, if you would rather choose it:
+
+- `coefficients.csv` — the regional technical coefficients, product by product.
+  This is the result.
+- `implicit_imports.csv` — by product, the interregional imports the scaling
+  implies. The quotient rule works by scaling a national coefficient **down**,
+  and what it takes out has to have come from somewhere: this file is where it
+  went. It is the quantity that makes the trade assumption inspectable instead
+  of implicit, and it is the one to read if you want to know what the method
+  decided on your behalf.
+- `regional_table.xlsx` — the region as a table rather than a matrix, in the
+  format this engine reads back, so it can be split, projected or diagnosed
+  like any other. Written only if `openpyxl` is installed.
+- `report.md` and `assumption_ledger.json` — what was done and what it rests on.
+
+And you get, printed whether you asked or not, what the method is known to get
+wrong:
 
 ```
 ## What this is known to get wrong

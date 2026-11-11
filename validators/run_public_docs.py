@@ -52,6 +52,19 @@ FAIL: list[str] = []
 # Options argparse defines that no user guide needs to explain.
 UNDOCUMENTED_OK = {"--help"}
 
+# Filenames that appear in `cli.py` or `export.py` and are NOT outputs the guide
+# owes a reader an explanation of. Each needs its reason here, because the whole
+# value of the check below is that the list is short and argued.
+NOT_AN_OUTPUT = {
+    # A cache the engine READS, under data/eurostat/. It never leaves the
+    # machine and no user names it.
+    "_verdicts.json",
+    # The filename in the no-argument help's own example -- `quadrium
+    # --template my_split.xlsx` -- so it is the user's choice of name, not a
+    # file the engine produces under one.
+    "my_split.xlsx",
+}
+
 # Each claim in the guide's "what it will not do" list, paired with the thing
 # whose existence would make it false. Adding a capability without revisiting
 # the list is exactly what happened; this makes it impossible to do twice.
@@ -251,6 +264,37 @@ def main() -> int:
           not missing,
           f"{len(parser_opts)} options, all documented" if not missing
           else f"missing: {', '.join(missing)}")
+
+    # ---- and every file the engine WRITES is in the guide too
+    #
+    # The same check one level down, and it was missing. On 2026-11-11 three of
+    # the four files `--regionalise` hands a user -- `coefficients.csv`,
+    # `implicit_imports.csv` and `regional_table.xlsx` -- appeared NOWHERE in
+    # the guide. The CHARM section names its two (`trade.csv`,
+    # `heterogeneity.csv`), which is exactly why those two were fine: a
+    # convention that holds where somebody happened to follow it is not a
+    # convention, it is luck.
+    #
+    # It matters here more than in most documents. `docs/GUIDE.md` is the only
+    # thing that describes this engine from outside it, and phase C of the
+    # roadmap is a stranger running it. A file they are handed and cannot look
+    # up is a file they will not open.
+    #
+    # Filenames are read out of the SOURCE rather than from a list kept here,
+    # for the reason every count in this file exists: a list maintained by hand
+    # goes stale and the check then guarantees nothing.
+    written = set()
+    for mod in (cli, __import__("quadrium.export", fromlist=["x"])):
+        for m in re.finditer(r'"([a-z0-9_]+\.(?:csv|json|md|xlsx))"',
+                             Path(mod.__file__).read_text()):
+            written.add(m.group(1))
+    undoc = sorted(f for f in written
+                   if f not in NOT_AN_OUTPUT and f not in gt)
+    check("and every file the engine writes is named in the guide",
+          not undoc,
+          f"{len(written) - len(NOT_AN_OUTPUT)} output file(s), all named; "
+          f"{len(NOT_AN_OUTPUT)} excluded with a reason in NOT_AN_OUTPUT"
+          if not undoc else f"missing: {', '.join(undoc)}")
 
     # ---- and the guide does not deny something the engine does
     print()
