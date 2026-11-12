@@ -556,7 +556,8 @@ prints it beside the figures. A block Eurostat covers none of is refused
 rather than returned as zero, because zero says nobody works there. With the
 account attached the report adds a second landing table, in jobs, and it does
 not read like the one in output: for Catalonia 87.0 % of the jobs an impulse
-in real estate sets off stay in the region against 93.9 % of the output.
+in real estate sets off stay in the region against 93.9 % of the output
+(`validators/run_eu_mrio_employment.py`).
 
 **Employment for the region, from Eurostat.** The archive's ten sectors are
 Eurostat's A10 grouping, and Eurostat publishes employment for NUTS-2 regions on
@@ -807,7 +808,7 @@ On the one split where the answer happens to be published — Spanish product 36
 which the INE separates in its 110-product supply table — eight survey proxies
 span **423.8 %** in the size of accommodation, and the proxy an economist would
 pick on conceptual grounds is **+40.8 %** out while the loosest match of the
-eight is the closest.
+eight is the closest (`validators/run_key_alternatives.py`).
 
 ### Sheet `scenarios` — how many answers you want
 

@@ -306,13 +306,38 @@ def main() -> int:
     # this file was written for -- six figures stale in a user's report for
     # hours -- and until now nothing would have caught it.
     #
-    # `docs/GUIDE.md` carries 23 figures their validators compute at run time
-    # and hold in no literal. Those are counted, listed, and FLOORED: the
-    # number may fall and may not rise, so §10's figures could be pinned
+    # `docs/GUIDE.md` carries figures their validators compute at run time and
+    # hold in no literal. Those are counted, listed, and FLOORED: the number
+    # may fall and may not rise, so §10's figures could be pinned
     # (run_charm.py does) without the next section's being left unpinned
     # quietly. Lowering this floor to make a run pass is the one thing it is
-    # for.
-    GUIDE_UNVERIFIABLE_FLOOR = 23
+    # NOT for; lowering it because figures were actually pinned is exactly
+    # what it is for.
+    #
+    # 23 -> 19 on 2026-11-11, AND NOT BY PINNING ANYTHING. Four of the 23 were
+    # not unpinned figures at all: the guide cited a validator that does not
+    # measure them, while another validator carried them as literals in the
+    # same words. 87.0 % and 93.9 % of jobs and output staying in Catalonia
+    # were attributed to `run_mrio_eurostat_codes.py`, which holds no decimal
+    # anywhere and is about correspondence codes; they are measured in
+    # `run_eu_mrio_employment.py`. The 423.8 % key spread and the +40.8 % error
+    # of the conceptually best proxy were attributed to
+    # `run_internal_block_backtest.py`; they are `run_key_alternatives.py`'s.
+    #
+    # The attribution is by PROXIMITY -- the nearest validator named after the
+    # claim -- so a paragraph that states a figure and cites its source several
+    # paragraphs later points the reader at the wrong file. That is worse than
+    # an unpinned figure: an unpinned figure cannot be checked, and a
+    # misattributed one sends a reader somewhere that will not answer them.
+    #
+    # ⚠ DO NOT read the remaining 19 as 19 unpinned figures without checking
+    # each. Searching all validators for an unverified figure finds a holder
+    # for most of them, and MOST OF THOSE ARE COINCIDENCE: this file measures
+    # that a one-decimal value lands on a given validator by chance 1.4 % to
+    # 11.6 % of the time. The four above were confirmed by the words around
+    # the number matching, not by the digits. A sweep that trusted the digits
+    # would have "found" ten.
+    GUIDE_UNVERIFIABLE_FLOOR = 19
     report_bad = [b for b in bad if b[0].endswith(".py")]
     guide_bad = [b for b in bad if b[0].endswith(".md")]
     check("the engine's own report still matches what measured it",
