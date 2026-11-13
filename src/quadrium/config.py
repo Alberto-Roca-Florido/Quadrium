@@ -118,10 +118,15 @@ REQUIRED_SHEETS = ("project",)
 # THREE jobs, not two: `targets` with `table_kind: eurostat_sut` describes a
 # projection, which has no splits either. The first version of this check
 # listed only the first two and refused every projection workbook.
-# FOUR jobs now: `charm` arrived 2026-11-08 and is not a `regionalise` with a
+# FIVE jobs now. `mixed` arrived 2026-11-12 and is the first that does not
+# BUILD a table: it answers a question about one. The mixed exogenous/endogenous
+# model was implemented and verified on 2026-10-10 (M-073, CORE_085) and for
+# thirty-three days it could only be reached by writing Python, which for a user
+# of the workbook is the same as not existing. That was the whole of this job.
+# FOUR jobs before that: `charm` arrived 2026-11-08 and is not a `regionalise` with a
 # different method. It takes the TOTAL-FLOW table where the quotient family
 # takes the DOMESTIC one, and it produces trade rather than a technology.
-ONE_OF_SHEETS = ("splits", "regionalise", "charm", "targets")
+ONE_OF_SHEETS = ("splits", "regionalise", "charm", "targets", "mixed")
 TABLE_KINDS = ("uk_analytical", "interchange",
                "ine_interior", "ine_total", "eurostat", "eurostat_sut",
                "eu_mrio")
@@ -1085,6 +1090,16 @@ def _rows(sheets: dict, name: str) -> list[dict]:
         row = {h: (r[i] if i < len(r) else None)
                for i, h in enumerate(head) if h}
         if any(v is not None and str(v).strip() != "" for v in row.values()):
+            # THE SHEET'S OWN ROW NUMBER, so an error message names the row the
+            # user is looking at. Added 2026-11-12 after a refusal said "row 5"
+            # about something typed on row 6: blank rows are dropped here, so
+            # counting the rows that survive gives a number that is confidently
+            # wrong -- the exact defect class this project hunts, inside the
+            # machinery that reports it. Set AFTER the emptiness test above, so
+            # it can never make an empty row look filled. `_row` is reserved;
+            # a sheet column of that name would be shadowed, and no template
+            # has one.
+            row["_row"] = raw.index(r) + 1
             out.append(row)
     return out
 
@@ -1127,8 +1142,9 @@ def load_config(path: Path | str, *, offline: bool = False,
             f"{path.name} says which table to use and then nothing to do with "
             f"it. Fill in `splits` to divide a sector, `regionalise` to "
             f"estimate a region's table from it, `charm` to estimate a "
-            f"region's two-way trade, or `targets` to project a supply-use "
-            f"pair. A workbook with none of the four describes no job.")
+            f"region's two-way trade, `targets` to project a supply-use "
+            f"pair, or `mixed` to fix some sectors' output and solve for the "
+            f"rest. A workbook with none of the five describes no job.")
     meta = {}
     for r in sheets["project"]:
         if r and r[0] is not None and str(r[0]).strip():
@@ -1138,7 +1154,7 @@ def load_config(path: Path | str, *, offline: bool = False,
             meta[k.lower()] = r[1] if len(r) > 1 else None
     tables = {name: _rows(sheets, name)
               for name in ("splits", "keys", "scenarios", "profiles",
-                           "targets", "satellites")}
+                           "targets", "satellites", "mixed")}
 
     # `regionalise` and `charm` are key/value like `project`, not tables of
     # rows: each job has one set of parameters, not one per sector.
@@ -1151,6 +1167,28 @@ def load_config(path: Path | str, *, offline: bool = False,
             "the location quotient family needs the DOMESTIC table and CHARM "
             "the TOTAL-FLOW one, and M-075 says the multipliers they give are "
             "not interchangeable. Clear one sheet, or use two workbooks.")
+    # `mixed` is checked BEFORE the two regional jobs and after neither:
+    # it is the only sheet that asks a question about a table instead of
+    # building one, so a workbook carrying it together with a building job is
+    # describing two runs and the engine must not silently pick one.
+    if tables["mixed"]:
+        other = [s for s in ("splits", "regionalise", "charm", "targets")
+                 if (reg if s == "regionalise" else
+                     ch if s == "charm" else tables[s])]
+        if other:
+            raise ConfigError(
+                f"this workbook has rows on the `mixed` sheet AND on "
+                f"`{other[0]}`, and they are two runs rather than one. "
+                f"`mixed` asks what happens to a table when some sectors' "
+                f"output is fixed; the other four BUILD a table. Running them "
+                f"together would leave it unsaid which table the question was "
+                f"asked of. Clear one sheet, or use two workbooks — and to ask "
+                f"the question of a table this engine built, run the building "
+                f"job first and point a second workbook's `table_path` at the "
+                f"file it wrote.")
+        return build_mixed(meta, tables["mixed"], base_dir=path.parent,
+                           label=path.name, satellites=tables["satellites"],
+                           offline=offline, refresh=refresh)
     if ch:
         return build_charm(meta, ch, base_dir=path.parent, label=path.name,
                            offline=offline, refresh=refresh)
@@ -1907,6 +1945,64 @@ def write_template(path: Path | str) -> Path:
         'and there is no way to suppress it.',
     ])
 
+    # The FIFTH job, and the only one that does not BUILD anything. Its sheet
+    # is rows rather than key/value because a scenario is one statement per
+    # sector, not one set of parameters.
+    sheet("mixed", ["sector_code", "fixed_output", "fixed_output_pct",
+                    "extra_demand"], [], [
+        '',
+        'LEAVE THIS SHEET EMPTY unless you want to ask what happens to the',
+        "rest of the economy when SOME sectors' output is FIXED.",
+        '',
+        'That is a different question from the usual one. The usual one',
+        'starts from demand: somebody buys more, and you solve for output.',
+        'This one starts from output: a quota, a closure, a licence or a',
+        "plant's capacity SETS a sector's output, whatever demand does, and",
+        'you solve for everything else.',
+        '',
+        'WHY NOT JUST PUT IT IN AS DEMAND. Because that OVERSTATES the',
+        'effect, and by a knowable amount: the sector sells to the others',
+        "too, so its own column of the inverse counts again the output it",
+        'already supplied. CORE_085 p. 61 says so in those terms. This model',
+        'moves the given outputs to the other side and solves the rest.',
+        '',
+        'One row per sector, and each row says ONE of three things:',
+        'fixed_output        this sector\'s output changes by this much, in',
+        "the table's own unit (so £ million, or whatever",
+        'the `project` sheet loaded).',
+        'fixed_output_pct    the same, as a per cent of this sector\'s OWN',
+        'output. Use this one: it is the form you',
+        'actually have. -20 means a fifth less.',
+        'extra_demand        final demand for this sector changes by this',
+        'much, and its output is solved for like any',
+        "other sector's.",
+        '',
+        'TWO OF THEM ON ONE ROW IS REFUSED, not added up. A sector whose',
+        'output you fix has no free final demand: the model GIVES you the',
+        'final demand that is consistent with the output you fixed, and that',
+        'is one of the two things this job exists to produce.',
+        '',
+        'A sheet with only `extra_demand` rows is allowed and is the ordinary',
+        'answer to a demand change. The report says which of the two you ran,',
+        'so nothing passes for the mixed model that was not.',
+        '',
+        'THIS SHEET CANNOT SHARE A WORKBOOK with `splits`, `regionalise`,',
+        '`charm` or `targets`. Those four build a table; this one asks a',
+        'question about one, and together they leave it unsaid which table',
+        'was asked. To ask it of a table this engine built, run the building',
+        "job first and point a second workbook's `table_path` at the file it",
+        'wrote.',
+        '',
+        'WHAT IT CANNOT SEE, and every run says so: the firms that BUY from a',
+        'sector whose output you cut are left short of an input, and this',
+        'model does not see that at all -- CORE_085 p. 59. The report prints,',
+        'for every sector you fixed, how much of its output other sectors buy',
+        'as an input, which is the size of exactly what is being left out.',
+        '',
+        'If the `satellites` sheet carries an account -- jobs, emissions --',
+        'the report and `effects.csv` carry its change too.',
+    ])
+
     wb.save(path)
     return path
 
@@ -2077,6 +2173,160 @@ def build_charm(meta: dict, ch: dict, base_dir: Path = Path("."),
             "defaults_taken": defaults_taken}
 
 
+def _mixed_num(v, field: str, n: int):
+    """A number from a `mixed` cell, or None for an empty one.
+
+    A cell that is not a number is REFUSED rather than coerced. "20%" and
+    "-1,200" are the two forms a person types that would otherwise become 20
+    and 1200 silently, and either would be the wrong scenario run without a
+    word. The percent form has its own column, which is why it is not accepted
+    here.
+    """
+    if v is None or str(v).strip() == "":
+        return None
+    s = str(v).strip()
+    try:
+        return float(s)
+    except ValueError:
+        extra = ""
+        if s.endswith("%"):
+            extra = (" For a percentage use the `fixed_output_pct` column, "
+                     "which says what it is of.")
+        elif "," in s:
+            extra = (" A thousands separator is not read: write 1200, not "
+                     "1,200, or the cell becomes a different number.")
+        raise ConfigError(
+            f"sheet 'mixed', row {n}: `{field}` is {v!r}, which is not a "
+            f"number.{extra}")
+
+
+def build_mixed(meta: dict, rows: list, base_dir: Path = Path("."),
+                label: str = "<configuration>", *,
+                satellites: list | None = None,
+                offline: bool = False, refresh: bool = False) -> dict:
+    """A mixed exogenous/endogenous run described by a workbook.
+
+    THE FIRST JOB THAT DOES NOT BUILD A TABLE
+    -------------------------------------------
+    The other four produce a table and this one asks a question about one: if
+    these sectors' output is fixed at these values, what happens to the rest?
+    The method is `M-073` from `CORE_085` (Steinback 2004), implemented and
+    verified in `mixed.py` on 2026-10-10. Until 2026-11-12 the only way to run
+    it was to write Python, so for a user of the workbook it did not exist.
+
+    The sheet is one row per sector, and a row says ONE of three things:
+
+    - `fixed_output`      this sector's output changes by this much, in the
+                          table's own unit, and the model solves for the rest.
+    - `fixed_output_pct`  the same, as a percentage of this sector's own
+                          output, which is the form a person actually holds.
+    - `extra_demand`      final demand for this sector changes by this much,
+                          and its output is solved for like any other.
+
+    TWO OF THEM ON ONE ROW IS REFUSED, not merged. A sector whose output is
+    fixed has no free final demand -- the model returns the final demand
+    consistent with the output you fixed -- so a row asserting both is asking
+    for two incompatible things, and picking one would answer a question
+    nobody asked.
+
+    A SHEET WITH NO FIXED OUTPUT IS ALLOWED, and is ordinary Leontief: a
+    final-demand scenario. `mixed_model` spans both ends on purpose, the
+    report says which one was run, and refusing would turn a legitimate
+    question into an error.
+    """
+    meta = {str(k).strip().lower(): v for k, v in (meta or {}).items()}
+    defaults_taken: list[str] = []
+    project_id = str(_need(meta, "project_id", "project", 0)).strip()
+
+    table, table_path, kind = _load_declared_table(
+        meta, base_dir, {}, offline, refresh, defaults_taken)
+
+    # The workbook's own accounts, on the same ADD-OR-REPLACE rule as a split:
+    # a sheet that says nothing about an account is not asking for the file's
+    # to be deleted. Without this a mixed run on an exported table would lose
+    # the employment the file carried and report output alone.
+    from_file = dict(getattr(table, "satellites", None) or {})
+    from_book = build_satellites(satellites or [], table)
+    table.satellites = {**from_file, **from_book}
+
+    codes = list(table.sector_codes)
+    X = np.asarray(table.X, float).ravel()
+    delta_x: dict = {}
+    delta_f: dict = {}
+    pct_asked: dict = {}
+    seen: dict = {}
+
+    for r in rows:
+        n = r.get("_row") or "?"
+        code = str(r.get("sector_code") or "").strip()
+        if not code:
+            raise ConfigError(
+                f"sheet 'mixed', row {n}: no `sector_code`. Every row of this "
+                f"sheet is about one sector of the table named on the "
+                f"`project` sheet.")
+        if code not in codes:
+            near = [c for c in codes if c.upper().startswith(code.upper()[:2])]
+            raise ConfigError(
+                f"sheet 'mixed', row {n}: {code!r} is not a sector of "
+                f"{table.table_id} ({len(codes)} sectors). "
+                + (f"Codes starting alike: {', '.join(near[:6])}."
+                   if near else f"The first few are "
+                               f"{', '.join(codes[:6])}."))
+        if code in seen:
+            raise ConfigError(
+                f"sheet 'mixed', row {n}: {code!r} already has a row "
+                f"({seen[code]}). Two rows for one sector are two scenarios, "
+                f"and adding them would invent a third nobody wrote. Put the "
+                f"figure you mean in one row.")
+        seen[code] = n
+
+        fo = _mixed_num(r.get("fixed_output"), "fixed_output", n)
+        fop = _mixed_num(r.get("fixed_output_pct"), "fixed_output_pct", n)
+        ed = _mixed_num(r.get("extra_demand"), "extra_demand", n)
+        given = [f for f, v in (("fixed_output", fo),
+                                ("fixed_output_pct", fop),
+                                ("extra_demand", ed)) if v is not None]
+        if not given:
+            raise ConfigError(
+                f"sheet 'mixed', row {n}: {code!r} is named and nothing is "
+                f"asked of it. Fill ONE of `fixed_output`, "
+                f"`fixed_output_pct` or `extra_demand`, or delete the row.")
+        if len(given) > 1:
+            raise ConfigError(
+                f"sheet 'mixed', row {n}: {code!r} carries "
+                f"{' and '.join('`' + g + '`' for g in given)}, and they are "
+                f"different requests. A sector whose output is fixed has no "
+                f"free final demand — the model returns the final demand that "
+                f"is consistent with the output you fixed — and two ways of "
+                f"fixing one output are two scenarios. Leave one.")
+
+        i = codes.index(code)
+        if fop is not None:
+            if X[i] <= 0:
+                raise ConfigError(
+                    f"sheet 'mixed', row {n}: {code!r} has output "
+                    f"{X[i]:,.6g} in this table, so there is no base for a "
+                    f"percentage. Use `fixed_output` and give the change in "
+                    f"{table.unit} directly.")
+            delta_x[code] = X[i] * fop / 100.0
+            pct_asked[code] = fop
+        elif fo is not None:
+            delta_x[code] = fo
+        else:
+            delta_f[code] = ed
+
+    exogenous = [c for c in codes if c in delta_x]
+
+    return {"kind": "mixed", "project_id": project_id,
+            "title": str(meta.get("title")
+                         or f"{project_id} — mixed exogenous/endogenous"),
+            "table": table, "source_file": table_path, "table_kind": kind,
+            "exogenous": exogenous, "delta_x": delta_x, "delta_f": delta_f,
+            "pct_asked": pct_asked,
+            "notes": str(meta.get("notes") or ""),
+            "defaults_taken": defaults_taken}
+
+
 def build_regionalisation(meta: dict, reg: dict, base_dir: Path = Path("."),
                           label: str = "<configuration>", *,
                           offline: bool = False,
@@ -2210,12 +2460,13 @@ def plan_workbook(path: Path | str) -> dict:
 
     rows = {name: _rows(sheets, name)
             for name in ("splits", "keys", "scenarios", "profiles", "targets",
-                         "satellites")}
+                         "satellites", "mixed")}
     reg = _keyvalue_sheet(sheets, "regionalise")
     ch = _keyvalue_sheet(sheets, "charm")
 
     kind = str(meta.get("table_kind") or "").strip().lower()
-    job = ("charm" if ch else
+    job = ("mixed" if rows["mixed"] else
+           "charm" if ch else
            "regionalise" if reg else
            "project" if rows["targets"] else
            "split" if rows["splits"] else None)
@@ -2349,7 +2600,8 @@ def plan_workbook(path: Path | str) -> dict:
                       "do with it",
             "`splits` divides a sector, `regionalise` estimates a region's "
             "table, `charm` estimates a region's two-way trade, `targets` "
-            "projects a supply-use pair. A workbook with none of the four "
+            "projects a supply-use pair, `mixed` fixes some sectors' output "
+            "and solves for the rest. A workbook with none of the five "
             "describes no job",
             "fill in ONE of them")
 
@@ -2548,6 +2800,64 @@ def plan_workbook(path: Path | str) -> dict:
                 "0.14 to 0.60, so a default would be a guess wearing a number",
                 "a value in [0, 1). The report prints what a blind choice "
                 "costs")
+
+    if job == "mixed":
+        # Every mistake the sheet can state WITHOUT reading the table, said
+        # here so `--plan` catches it in one pass. The codes themselves need
+        # the table and are checked by `build_mixed` at load.
+        seen_here: dict = {}
+        for r in rows["mixed"]:
+            n = r.get("_row") or "?"
+            code = str(r.get("sector_code") or "").strip()
+            if not code:
+                gap("mixed", f"row {n} has no `sector_code`",
+                    "every row of this sheet is a statement about one sector "
+                    "of the table the `project` sheet names",
+                    "the sector's code, as the TABLE spells it")
+                continue
+            if code in seen_here:
+                gap("mixed", f"{code!r} has two rows "
+                             f"({seen_here[code]} and {n})",
+                    "two rows for one sector are two scenarios, and adding "
+                    "them would invent a third nobody wrote",
+                    "one row per sector, carrying the figure you mean")
+            seen_here[code] = n
+            filled = [f for f in ("fixed_output", "fixed_output_pct",
+                                  "extra_demand")
+                      if str(r.get(f) or "").strip() != ""]
+            if not filled:
+                gap("mixed", f"row {n} names {code!r} and asks nothing of it",
+                    "a sector with no figure is neither fixed nor shocked, so "
+                    "the row says nothing",
+                    "one of `fixed_output`, `fixed_output_pct` or "
+                    "`extra_demand`, or delete the row")
+            elif len(filled) > 1:
+                gap("mixed", f"row {n} carries "
+                             f"{' and '.join('`' + f + '`' for f in filled)}",
+                    "a sector whose output is fixed has no free final demand "
+                    "— the model RETURNS the final demand consistent with the "
+                    "output you fixed — and two ways of fixing one output are "
+                    "two scenarios",
+                    "leave one of them")
+            for f in filled:
+                v = str(r.get(f)).strip()
+                try:
+                    float(v)
+                except ValueError:
+                    gap("mixed", f"row {n}: `{f}` is {v!r}, not a number",
+                        "a cell that is not a number would have to be guessed "
+                        "at, and \"20%\" or \"1,200\" guessed wrongly is a "
+                        "different scenario run without a word",
+                        "a plain number; for a per cent use the "
+                        "`fixed_output_pct` column, which says what it is of")
+        if kind == "eurostat" and str(
+                meta.get("eurostat_variant") or "").strip().lower() == "total":
+            gap("project", "`eurostat_variant` is `total` and the job is mixed",
+                "a total-flow table distributes IMPORTED inputs across the "
+                "intermediate matrix, so the coefficients include them and the "
+                "scenario propagates through purchases from abroad as though "
+                "they were domestic production",
+                "`domestic`, unless you mean that")
 
     if job == "charm":
         if not str(ch.get("activity_path") or "").strip():

@@ -723,14 +723,19 @@ producing a result. See §7.
 quadrium --template my_config.xlsx
 ```
 
-That writes a blank workbook with six sheets. Every sheet carries its own
+That writes a blank workbook with nine sheets. Every sheet carries its own
 instructions at the bottom, in grey. What follows is the same thing with more
 room to explain.
 
-**A workbook describes one job, not two.** Fill in `splits` to divide a sector,
-or `regionalise` to estimate a region from the table — never both. The five
-sheets below are the split; `regionalise` is [§9](#9-estimate-a-regions-table),
-and a workbook with neither filled in is refused rather than run empty.
+**A workbook describes one job, not two.** Five of the nine sheets below are
+the split — fill in `splits` to divide a sector. The other four are the other
+four jobs, one sheet each: `regionalise` is
+[§9](#9-estimate-a-regions-table), `charm` is
+[§10](#10-estimate-a-regions-two-way-trade), `mixed` is
+[§11](#11-fix-some-industries-output-and-solve-for-the-rest), and `targets`
+projects a supply-use pair to another year. Fill in exactly one. A workbook
+with two of them filled in describes two runs and is refused rather than
+answered half way, and one with none of them is refused rather than run empty.
 
 ### Sheet `project`
 
@@ -1597,7 +1602,78 @@ Every run prints all of that, and there is no way to suppress it.
 
 ---
 
-## 11. What it will not do
+## 11. Fix some industries' output and solve for the rest
+
+Everything above starts from demand: somebody buys more, and the engine solves
+for the output that has to be produced. Sometimes you know the other end. A
+quota caps a fishery. A plant closes. A licence limits generation. A capacity
+constraint fixes what an industry can make, whatever demand does.
+
+**Feeding that in as a change in demand overstates the effect**, and not by a
+little. The industry also sells to the other industries, so its own column of
+the Leontief inverse counts again the output it has already supplied —
+`CORE_085` p. 61 puts it as "the economy-wide effects would be overestimated".
+The mixed model moves the given outputs to the other side of the equation and
+solves for everything else. `M-073`, from Steinback (2004).
+
+In the workbook, a `mixed` sheet, one row per industry, and each row says
+**one** of three things:
+
+| column | what it means |
+|---|---|
+| `fixed_output` | this industry's output changes by this much, in the table's own unit |
+| `fixed_output_pct` | the same, as a per cent of this industry's **own** output. Usually the one you want: `-20` is a fifth less |
+| `extra_demand` | final demand for this industry changes by this much, and its output is solved for like any other |
+
+Two of them on one row is **refused**, not added up. Fixing an industry's
+output does not leave its final demand free — the model *returns* the final
+demand that is consistent with the output you fixed, and that is one of the two
+things this job exists to produce. A sheet with only `extra_demand` rows is
+allowed and is the ordinary answer to a demand change; the report says which of
+the two you ran, so nothing passes for the mixed model that was not.
+
+This sheet **cannot share a workbook** with `splits`, `regionalise`, `charm` or
+`targets`. Those four build a table; this one asks a question about one, and
+together they leave it unsaid which table was asked. To ask it of a table this
+engine built, run the building job first and point a second workbook's
+`table_path` at the file it wrote.
+
+You get `mixed.csv` — every industry's output and final-demand change, and
+which side of the model it was on, so a figure you gave is never mistaken for
+a result — and `multipliers.csv`, how much each unknown moves per unit of each
+value you gave. If the `satellites` sheet carries an account, `effects.csv`
+carries its change too, industry by industry.
+
+### What this is known to get wrong
+
+**Backward linkages only.** Cut an industry's output and the firms that *buy*
+from it are left short of an input. This model does not see that at all, by
+construction: `CORE_085` p. 59 says the forward effects on the industries that
+use the exogenized outputs as inputs "are not explicitly considered", and that
+the approach "is most suitable for modeling capacity constraint scenarios where
+there are limited purchases of the exogenized sector(s) outputs by the other
+endogenous sectors".
+
+So every run prints, for each industry whose output you fixed, **how much of
+its output other industries buy as an input** — which is the size of exactly
+what is being left out. On the UK 2023 table, fixing agriculture means leaving
+out a channel carrying 38.9 % of its output
+(`validators/run_mixed_from_config.py` pins that figure). That is a warning and
+not a refusal, because the model is correct about what it does compute, and there is
+no way to suppress it.
+
+**And the implementation is checked against the source's own printed numbers,
+not against its final answer.** `validators/run_mixed_model.py` reproduces the
+worked example of `CORE_085`'s appendix — output prints as 65,346 and 42,178 —
+and holds the two routes the source gives to each other: the mixed system and
+the modified-inverse form of its equation (4) agree exactly, on the paper's
+example and on real tables with 1, 3 and 12 industries fixed. At the two ends,
+with nothing fixed it reduces to ordinary Leontief and with everything fixed to
+the accounting identity, and both are tested.
+
+---
+
+## 12. What it will not do
 
 - **Say WHERE a region's trade goes.** Section 10 estimates how much a region
   ships out and takes in, both at once — the gross two-way flow a location

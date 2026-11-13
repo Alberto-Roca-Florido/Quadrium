@@ -799,6 +799,28 @@ def main(argv=None) -> int:
             res, table, args.outputs, cfg["project_id"],
             Path(cfg["source_file"]).name, Path(cfg["activity_file"]).name)
 
+    # The FIFTH job, and the first that does not build a table: it asks a
+    # question about one. `build_mixed` has already refused every scenario the
+    # sheet can state wrongly, so by here the run is one the model admits.
+    if cfg.get("kind") == "mixed":
+        from .mixed import MixedModelError, mixed_model_from_table
+        table = cfg["table"]
+        try:
+            res = mixed_model_from_table(
+                table, cfg["exogenous"],
+                delta_x=cfg["delta_x"] or None,
+                delta_f=cfg["delta_f"] or None)
+        except (MixedModelError, ValueError) as exc:
+            print(f"The model refused:\n\n  {exc}\n", file=sys.stderr)
+            return 2
+        if args.check:
+            print(f"Table   : {table.table_id} — {table.n} sectors, "
+                  f"{table.unit}")
+            print(_mixed_report(res, cfg, table, check=True))
+            return 0
+        print(f"Table   : {table.table_id} — {table.n} sectors, {table.unit}")
+        return _write_mixed(res, cfg, table, args.outputs)
+
     _describe(cfg)
     # Printed on BOTH paths. Warning only under --check would mean the run that
     # actually produces numbers is the quieter of the two.
@@ -1085,6 +1107,250 @@ def _charm(args) -> int:
 
     return _write_charm(res, table, args.outputs, args.name,
                         Path(args.national).name, Path(args.charm).name)
+
+
+def _mixed_report(res, cfg, table, check: bool = False) -> str:
+    """The report of a mixed run, one function so both doors say the same.
+
+    `--check` prints it and writes nothing; a real run writes it to
+    `report.md`. The text is identical, which is the point: a dry run that
+    described the result differently would be a different dry run.
+    """
+    import numpy as np
+
+    codes = list(table.sector_codes)
+    X = np.asarray(table.X, float).ravel()
+    exo = list(cfg["exogenous"])
+    pct = cfg["pct_asked"]
+    fixed_total = float(res.x[res.exogenous].sum())
+    knock_on = float(res.x[res.endogenous].sum())
+    total = fixed_total + knock_on
+
+    lines = [f"# {cfg['title']}", ""]
+    if not exo:
+        lines += [
+            "**No sector's output was fixed on the `mixed` sheet, so this is "
+            "the ordinary Leontief answer to a change in final demand.** That "
+            "is a legitimate question and the model spans both ends, but it "
+            "is not the mixed model: nothing here was held at a given output.",
+            ""]
+    lines += [
+        f"From `{Path(str(cfg['source_file'])).name}` "
+        f"({table.country} {table.year}, {table.n} sectors, {table.unit}).",
+        "",
+        "## What was fixed, and what it did",
+        "",
+    ]
+    if exo:
+        lines += [f"| sector | output, {table.unit} | output fixed to change by "
+                  f"| as % of its own output |", "|---|---:|---:|---:|"]
+        for c in exo:
+            i = codes.index(c)
+            share = (res.x[i] / X[i] * 100) if X[i] else float("nan")
+            asked = (f"{pct[c]:+.4g} % (asked)" if c in pct
+                     else f"{share:+.4g} %")
+            lines.append(f"| `{c}` | {X[i]:,.1f} | {res.x[i]:+,.1f} | {asked} |")
+        lines += ["",
+                  f"Those {len(exo)} sector(s) move by **{fixed_total:+,.1f} "
+                  f"{table.unit}** between them, which is the figure you gave, "
+                  f"not a result.",
+                  "",
+                  f"**The result is the other {table.n - len(exo)} sectors: "
+                  f"{knock_on:+,.1f} {table.unit}.** Total change in output "
+                  f"across the table, {total:+,.1f} {table.unit}"
+                  + (f", or {total / fixed_total:,.3f} per unit of the output "
+                     f"you fixed." if fixed_total else ".")]
+    else:
+        lines += [f"Final demand was moved for "
+                  f"{len(cfg['delta_f'])} sector(s), by "
+                  f"{sum(float(v) for v in cfg['delta_f'].values()):+,.1f} "
+                  f"{table.unit} in all.",
+                  "",
+                  f"**Output across the table changes by {total:+,.1f} "
+                  f"{table.unit}.**"]
+
+    # THE DEMAND SHOCKS, WHICH THE FIRST VERSION OF THIS REPORT DROPPED.
+    # A sheet may fix some outputs AND move some final demands in the same
+    # scenario, which is the normal case: a quota on one industry while
+    # another's orders rise. The report named only the fixed sectors, so a
+    # figure the user had typed in did not appear anywhere in the document
+    # describing the run. Caught on the first real run, 2026-11-12.
+    if exo and cfg["delta_f"]:
+        lines += ["", "## And final demand you moved yourself", "",
+                  "Given on the sheet, alongside the fixed outputs. These are "
+                  "figures you gave, not results.", ""]
+        for c, v in cfg["delta_f"].items():
+            i = codes.index(c)
+            lines.append(f"- `{c}` — final demand {float(v):+,.1f} "
+                         f"{table.unit}, and its output is solved for like "
+                         f"any other: {res.x[i]:+,.1f}")
+
+    # The consistent final demand of the fixed sectors. This is the quantity
+    # the mixed model exists to produce and the one a Leontief run cannot
+    # give, so it is named rather than left in the CSV.
+    if exo:
+        lines += ["", "## What final demand has to do for that to hold", "",
+                  "Fixing a sector's output does not leave its final demand "
+                  "free: the model returns the change in final demand that is "
+                  "consistent with the output you fixed. This is a "
+                  "consequence of the scenario, `DERIVED`, not a figure "
+                  "anybody observed.", ""]
+        for c in exo:
+            i = codes.index(c)
+            lines.append(f"- `{c}` — final demand {res.f[i]:+,.1f} "
+                         f"{table.unit}")
+
+    lines += ["", "## What this is known to get wrong", "",
+              "*Printed because the method has a measured limitation and a "
+              "number without it invites more confidence than it has earned. "
+              "`M-073`, `CORE_085` p. 59.*", ""]
+    if exo:
+        lines += [
+            "**Backward linkages only.** `CORE_085` p. 59: the forward "
+            "effects on the production of sectors that use the exogenized "
+            "outputs as inputs \"are not explicitly considered\". Cut a "
+            "sector's output and the firms that BUY from it are left short of "
+            "an input; this model does not see that, by construction. The "
+            "source says the approach \"is most suitable for modeling "
+            "capacity constraint scenarios where there are limited purchases "
+            "of the exogenized sector(s) outputs by the other endogenous "
+            "sectors\".",
+            "",
+            "How much that matters here, sector by sector — the share of each "
+            "fixed sector's output that other sectors buy as an input:",
+            ""]
+        for c in exo:
+            s = res.forward_share.get(c)
+            if s is None:
+                continue
+            verdict = ("small, so the limitation is mild for this sector"
+                       if s < 0.10 else
+                       "LARGE: most of this sector's output is an input to "
+                       "others, and that channel is the one the model does "
+                       "not see" if s >= 0.40 else
+                       "material; read the result with it in mind")
+            lines.append(f"- `{c}` — {s * 100:.1f} % of its output is bought "
+                         f"as an input by other sectors. {verdict}.")
+        lines += ["",
+                  "This is a warning and not a refusal, because the model is "
+                  "correct about what it computes. `M-073`."]
+    else:
+        lines += ["Nothing was exogenized, so the forward-linkage limitation "
+                  "does not apply to this run. The ordinary caveats of a "
+                  "Leontief answer do: fixed coefficients, no capacity "
+                  "limits, no price response."]
+
+    if res.condition_number > 1e10:
+        lines += ["", f"⚠ **The system is ill-conditioned** (condition number "
+                      f"{res.condition_number:.3g}). The arithmetic is at the "
+                      f"edge of what the numbers can carry; treat the last "
+                      f"digits as noise and check whether a fixed sector is "
+                      f"nearly a linear combination of others."]
+
+    accounts = dict(getattr(table, "satellites", None) or {})
+    if accounts:
+        lines += ["", "## Satellite accounts", "",
+                  "Each account's change is its value per unit of output "
+                  "times the change in output, sector by sector. The per-unit "
+                  "figure is `DERIVED` from the account and the table's "
+                  "output; the account itself is whatever its own source says.",
+                  ""]
+        for name, acc in sorted(accounts.items()):
+            v = np.asarray(getattr(acc, "values", acc), float).ravel()
+            if v.shape != X.shape:
+                continue
+            with np.errstate(divide="ignore", invalid="ignore"):
+                c = np.where(X > 0, v / np.where(X > 0, X, 1.0), 0.0)
+            eff = res.effect(c)
+            unit = getattr(acc, "unit", "") or ""
+            lines.append(f"- **{name}** — {eff.sum():+,.2f} {unit}, of which "
+                         f"{eff[res.endogenous].sum():+,.2f} in the sectors "
+                         f"whose output was not fixed")
+    if not check:
+        lines += ["", "## What was written", "",
+                  "- `mixed.csv` — every sector's output and final demand "
+                  "change, and which side of the model it was on. This file "
+                  "IS the result.",
+                  "- `multipliers.csv` — how much each unknown moves per unit "
+                  "of each value you gave. Column order is the table's.",
+                  ]
+        if accounts:
+            lines.append("- `effects.csv` — the change in each satellite "
+                         "account, by sector.")
+    return "\n".join(lines) + "\n"
+
+
+def _write_mixed(res, cfg, table, out_root) -> int:
+    """Write a mixed run: the result, the multipliers, the accounts, the report.
+
+    EVERY CSV HERE IS WRITTEN WITH THE `csv` MODULE, NOT WITH f-STRINGS, and
+    that is not a style preference. The UK 2023 table has a sector whose CODE
+    CONTAINS A COMMA -- `F41, F42  & F43` -- so pasting the code and a comma
+    together produces a file with one extra column on that row, silently. The
+    first version of this function did exactly that and the validator caught it
+    on its first run, 2026-11-12, while reading back a file it had just
+    written. Codes come from an office's spreadsheet and the engine does not
+    get to assume what is in them.
+    """
+    import csv
+
+    import numpy as np
+
+    codes = list(table.sector_codes)
+    X = np.asarray(table.X, float).ravel()
+    out = Path(out_root) / (cfg["project_id"] or "mixed")
+    out.mkdir(parents=True, exist_ok=True)
+
+    with (out / "mixed.csv").open("w", newline="") as fh:
+        fh.write("# The mixed exogenous/endogenous model, M-073, from "
+                 "CORE_085 (Steinback 2004).\n")
+        fh.write("# `side` says which: 'output fixed' is a figure you GAVE, "
+                 "'solved' is a result.\n")
+        w = csv.writer(fh)
+        w.writerow(["sector_code", "X", "delta_x", "delta_x_pct", "delta_f",
+                    "side"])
+        for i, c in enumerate(codes):
+            pct = (res.x[i] / X[i] * 100) if X[i] else float("nan")
+            w.writerow([c, f"{X[i]:.6f}", f"{res.x[i]:.6f}", f"{pct:.6f}",
+                        f"{res.f[i]:.6f}",
+                        "solved" if res.endogenous[i] else "output fixed"])
+
+    with (out / "multipliers.csv").open("w", newline="") as fh:
+        fh.write("# M^-1 N: row i, column j is how much unknown i moves per "
+                 "unit of the known value given for j.\n")
+        w = csv.writer(fh)
+        w.writerow(["sector_code"] + codes)
+        for i, c in enumerate(codes):
+            w.writerow([c] + [f"{v:.9f}" for v in res.multipliers[i]])
+
+    accounts = dict(getattr(table, "satellites", None) or {})
+    wrote_effects = False
+    if accounts:
+        rows = {}
+        for name, acc in sorted(accounts.items()):
+            v = np.asarray(getattr(acc, "values", acc), float).ravel()
+            if v.shape != X.shape:
+                continue
+            with np.errstate(divide="ignore", invalid="ignore"):
+                coef = np.where(X > 0, v / np.where(X > 0, X, 1.0), 0.0)
+            rows[name] = res.effect(coef)
+        if rows:
+            wrote_effects = True
+            with (out / "effects.csv").open("w", newline="") as fh:
+                fh.write("# Change in each satellite account: its value per "
+                         "unit of output times the change in output.\n")
+                fh.write("# The per-unit figure is DERIVED from the account "
+                         "and the table's output.\n")
+                w = csv.writer(fh)
+                w.writerow(["sector_code"] + list(rows))
+                for i, c in enumerate(codes):
+                    w.writerow([c] + [f"{rows[k][i]:.6f}" for k in rows])
+
+    (out / "report.md").write_text(_mixed_report(res, cfg, table))
+    print(f"Written : {out}/")
+    print("          mixed.csv · multipliers.csv"
+          + (" · effects.csv" if wrote_effects else "") + " · report.md")
+    return 0
 
 
 def _write_charm(res, table, out_root, name, national_name,

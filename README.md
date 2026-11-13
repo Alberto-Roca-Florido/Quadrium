@@ -72,7 +72,7 @@ natively. No Python: you fill in a spreadsheet and run one command.
 ## What makes this different from a matrix library
 
 **Every claim in here is checked against a number somebody else published.**
-A hundred and forty-seven validators run on official data from seven
+A hundred and forty-eight validators run on official data from seven
 statistical offices, and they are the documentation: each one states what it
 is testing, cites the paragraph and page it comes from, and prints the
 deviation it measured.
@@ -123,7 +123,7 @@ validators say so on the project's own fixtures.
 ```
 src/quadrium/     the engine: loaders, solvers, transformation, disaggregation,
                   balancing, validation, reporting
-validators/      147 runnable checks against published tables
+validators/      148 runnable checks against published tables
 data/             the tables they run on — see PROVENANCE.md
 docs/             the user guide
 outputs/          two finished runs, published so they can be read without
