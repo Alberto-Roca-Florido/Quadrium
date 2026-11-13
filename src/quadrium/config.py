@@ -126,7 +126,33 @@ REQUIRED_SHEETS = ("project",)
 # FOUR jobs before that: `charm` arrived 2026-11-08 and is not a `regionalise` with a
 # different method. It takes the TOTAL-FLOW table where the quotient family
 # takes the DOMESTIC one, and it produces trade rather than a technology.
-ONE_OF_SHEETS = ("splits", "regionalise", "charm", "targets", "mixed")
+# SIX jobs since 2026-11-13. `multipliers` is the second that asks a question
+# instead of building a table, and the two describing sheets are now a NAMED
+# SET rather than a special case written into one `if`: the first describing
+# job spelled its exclusivity out by hand, which would have had to be copied
+# -- and kept in step -- for every one after it.
+#: The title `--template` writes as an EXAMPLE. A job that is not a split must
+#: not inherit it: a multiplier table headed "My sector split" is exactly the
+#: confidently-wrong artefact this project keeps finding, and it was found here
+#: on the first real run of the sixth job. `_title` below drops it, so a user
+#: who never edited the cell gets a description of what was actually run.
+TEMPLATE_TITLE = "My sector split"
+
+
+def _title(meta: dict, fallback: str) -> str:
+    """The run's title, ignoring the template's own example.
+
+    A user who left the title cell alone has not named this run; taking the
+    example as a name states something false in the one line of the report
+    people read first.
+    """
+    given = str(meta.get("title") or "").strip()
+    return fallback if not given or given == TEMPLATE_TITLE else given
+
+
+BUILDING_SHEETS = ("splits", "regionalise", "charm", "targets")
+DESCRIBING_SHEETS = ("mixed", "multipliers")
+ONE_OF_SHEETS = BUILDING_SHEETS + DESCRIBING_SHEETS
 TABLE_KINDS = ("uk_analytical", "interchange",
                "ine_interior", "ine_total", "eurostat", "eurostat_sut",
                "eu_mrio")
@@ -589,6 +615,28 @@ def _load_eurostat_sut(req: dict, offline: bool, refresh: bool,
             stamps.append(f"{path.name} (no provenance sidecar)")
     table.notes = ((table.notes or "") + " Built from " + "; ".join(stamps)
                    + ".").strip()
+
+    # THE LINEAGE, WHICH THIS TABLE CARRIED EMPTY UNTIL 2026-11-13. Two things
+    # were lost by that, and both are statements a reader needs:
+    #
+    #   * WHICH TRANSFORMATION MODEL built it. `M-028`: "A multiplier is
+    #     meaningless without knowing which of Models A-D generated its
+    #     table." The model is right here in `req["model"]`, and the
+    #     multiplier table's own provenance block -- which reads the lineage --
+    #     was printing "NOT SPECIFIED" for a table whose model was known. Not
+    #     a gap in the data: a fact the engine held and did not write down.
+    #   * THAT IT WAS PROJECTED at all. A projected table's cells are
+    #     ESTIMATED from targets, so its multipliers estimate another year's
+    #     multipliers rather than measuring this one's. `known_wrong` says so
+    #     and could never fire, because nothing recorded the projection.
+    table.lineage = list(table.lineage or []) + [
+        f"transformed from a supply-use pair by model {req['model']} "
+        f"(CORE_013)"]
+    if req.get("project_to_year"):
+        table.lineage.append(
+            f"projected to {req['project_to_year']} by "
+            f"{req.get('project_method') or 'the targets sheet'}: every cell "
+            f"is ESTIMATED from the targets, not observed in that year")
     return table
 
 
@@ -1076,12 +1124,29 @@ def _rows(sheets: dict, name: str) -> list[dict]:
     """Sheet -> list of dicts keyed by the header row, blank rows dropped."""
     if name not in sheets:
         return []
-    raw = [r for r in sheets[name] if r and any(c is not None for c in r)]
-    if not raw:
+    # THE SHEET'S OWN ROW NUMBER IS CAPTURED HERE, WHILE FILTERING, and that
+    # is the whole correction. The first version of this took it afterwards
+    # with `raw.index(r) + 1`, which was wrong twice:
+    #
+    #   * `raw` has already had its blank rows removed, so the position in it
+    #     is NOT the position in the sheet -- the very defect the row number
+    #     was added to fix, still there, one layer in;
+    #   * `.index()` matches by EQUALITY, so two identical rows both reported
+    #     the first one's number. `--plan` said "row 3 asks for 'output'
+    #     twice" about a duplicate typed on row 4, which sends the user to
+    #     correct the row that was fine.
+    #
+    # Found 2026-11-13 by reading a `--plan` output rather than by a test: the
+    # test workbook had no blank rows above the data, so position and row
+    # number coincided and the check passed for the wrong reason.
+    numbered = [(i, r) for i, r in enumerate(sheets[name], start=1)
+                if r and any(c is not None for c in r)]
+    if not numbered:
         return []
-    head = [str(c).strip().lower() if c is not None else "" for c in raw[0]]
+    head = [str(c).strip().lower() if c is not None else ""
+            for c in numbered[0][1]]
     out = []
-    for r in raw[1:]:
+    for lineno, r in numbered[1:]:
         # A row whose first cell starts with '#' is a comment. The template
         # writes its instructions underneath the data in exactly that form, so
         # the sheet explains itself without the explanation becoming data.
@@ -1090,16 +1155,10 @@ def _rows(sheets: dict, name: str) -> list[dict]:
         row = {h: (r[i] if i < len(r) else None)
                for i, h in enumerate(head) if h}
         if any(v is not None and str(v).strip() != "" for v in row.values()):
-            # THE SHEET'S OWN ROW NUMBER, so an error message names the row the
-            # user is looking at. Added 2026-11-12 after a refusal said "row 5"
-            # about something typed on row 6: blank rows are dropped here, so
-            # counting the rows that survive gives a number that is confidently
-            # wrong -- the exact defect class this project hunts, inside the
-            # machinery that reports it. Set AFTER the emptiness test above, so
-            # it can never make an empty row look filled. `_row` is reserved;
-            # a sheet column of that name would be shadowed, and no template
-            # has one.
-            row["_row"] = raw.index(r) + 1
+            # Set AFTER the emptiness test above, so it can never make an
+            # empty row look filled. `_row` is reserved; a sheet column of
+            # that name would be shadowed, and no template has one.
+            row["_row"] = lineno
             out.append(row)
     return out
 
@@ -1143,8 +1202,9 @@ def load_config(path: Path | str, *, offline: bool = False,
             f"it. Fill in `splits` to divide a sector, `regionalise` to "
             f"estimate a region's table from it, `charm` to estimate a "
             f"region's two-way trade, `targets` to project a supply-use "
-            f"pair, or `mixed` to fix some sectors' output and solve for the "
-            f"rest. A workbook with none of the five describes no job.")
+            f"pair, `mixed` to fix some sectors' output and solve for the "
+            f"rest, or `multipliers` to be told what the table you already "
+            f"have implies. A workbook with none of the six describes no job.")
     meta = {}
     for r in sheets["project"]:
         if r and r[0] is not None and str(r[0]).strip():
@@ -1154,7 +1214,7 @@ def load_config(path: Path | str, *, offline: bool = False,
             meta[k.lower()] = r[1] if len(r) > 1 else None
     tables = {name: _rows(sheets, name)
               for name in ("splits", "keys", "scenarios", "profiles",
-                           "targets", "satellites", "mixed")}
+                           "targets", "satellites", "mixed", "multipliers")}
 
     # `regionalise` and `charm` are key/value like `project`, not tables of
     # rows: each job has one set of parameters, not one per sector.
@@ -1167,25 +1227,46 @@ def load_config(path: Path | str, *, offline: bool = False,
             "the location quotient family needs the DOMESTIC table and CHARM "
             "the TOTAL-FLOW one, and M-075 says the multipliers they give are "
             "not interchangeable. Clear one sheet, or use two workbooks.")
-    # `mixed` is checked BEFORE the two regional jobs and after neither:
-    # it is the only sheet that asks a question about a table instead of
-    # building one, so a workbook carrying it together with a building job is
-    # describing two runs and the engine must not silently pick one.
-    if tables["mixed"]:
-        other = [s for s in ("splits", "regionalise", "charm", "targets")
-                 if (reg if s == "regionalise" else
-                     ch if s == "charm" else tables[s])]
-        if other:
+    # THE DESCRIBING SHEETS ARE CHECKED BEFORE THE BUILDING ONES, and the
+    # check is over the named set rather than written out per sheet. A sheet
+    # that asks a question about a table cannot share a workbook with one that
+    # builds a table -- that would leave it unsaid WHICH table the question was
+    # asked of -- and two describing sheets cannot share one either, because
+    # they are two reports and the engine must not silently pick an order.
+    #
+    # Said generically because the first version of this was written for
+    # `mixed` alone, and the second describing job arrived the next day.
+    def _present(name):
+        return reg if name == "regionalise" else (
+            ch if name == "charm" else tables.get(name))
+
+    asking = [s for s in DESCRIBING_SHEETS if _present(s)]
+    if len(asking) > 1:
+        raise ConfigError(
+            f"this workbook has rows on `{asking[0]}` AND on `{asking[1]}`, "
+            f"and each one asks its own question about the table. They are two "
+            f"reports, not one: running them together would say nothing about "
+            f"which came first and both write into the same folder. Use two "
+            f"workbooks.")
+    if asking:
+        building = [s for s in BUILDING_SHEETS if _present(s)]
+        if building:
             raise ConfigError(
-                f"this workbook has rows on the `mixed` sheet AND on "
-                f"`{other[0]}`, and they are two runs rather than one. "
-                f"`mixed` asks what happens to a table when some sectors' "
-                f"output is fixed; the other four BUILD a table. Running them "
-                f"together would leave it unsaid which table the question was "
-                f"asked of. Clear one sheet, or use two workbooks — and to ask "
-                f"the question of a table this engine built, run the building "
-                f"job first and point a second workbook's `table_path` at the "
-                f"file it wrote.")
+                f"this workbook has rows on the `{asking[0]}` sheet AND on "
+                f"`{building[0]}`, and they are two runs rather than one. "
+                f"`{asking[0]}` asks a question about a table; the four "
+                f"building sheets MAKE a table. Running them together would "
+                f"leave it unsaid which table the question was asked of. "
+                f"Clear one sheet, or use two workbooks — and to ask the "
+                f"question of a table this engine built, run the building job "
+                f"first and point a second workbook's `table_path` at the file "
+                f"it wrote.")
+    if tables["multipliers"]:
+        return build_multipliers(meta, tables["multipliers"],
+                                 base_dir=path.parent, label=path.name,
+                                 satellites=tables["satellites"],
+                                 offline=offline, refresh=refresh)
+    if tables["mixed"]:
         return build_mixed(meta, tables["mixed"], base_dir=path.parent,
                            label=path.name, satellites=tables["satellites"],
                            offline=offline, refresh=refresh)
@@ -1470,23 +1551,7 @@ def build_config(meta: dict, tables: dict, base_dir: Path = Path("."),
             f"the satellite account(s) {', '.join(replaced)} came with the "
             f"table AND are declared here; the workbook's figures are used")
 
-    # The label lookup in `_type_ii_spec` would ACCEPT `VA` here, because the
-    # row exists -- it is simply not income. So the refusal is by kind.
-    if kind == "eu_mrio" and (
-            str(meta.get("type_ii_income_rows") or "").strip()
-            or str(meta.get("type_ii_household_column") or "").strip()):
-        raise ConfigError(
-            f"a type II closure cannot be built on this table: "
-            f"{_EU_MRIO_NO_TYPE_II}. Remove both type_ii rows; the type I "
-            f"results and any satellite accounts are unaffected.")
-    spec = _type_ii_spec(meta, table)
-    if spec:
-        table.type_ii = spec
-    elif getattr(table, "type_ii", None):
-        defaults_taken.append(
-            "the type II closure came with the table and this workbook does "
-            "not mention it; it is kept, and the report says which rows it "
-            "closes on")
+    _attach_type_ii(meta, table, kind, defaults_taken)
 
     # ---- keys ---------------------------------------------------------
     grouped: dict[str, list[dict]] = {}
@@ -1722,7 +1787,7 @@ def write_template(path: Path | str) -> Path:
             # so and sends them to --sources, which lists what they do have.
             ("table_path", TEMPLATE_TABLE_PATH),
             ("table_kind", "uk_analytical"),
-            ("title", "My sector split"),
+            ("title", TEMPLATE_TITLE),
             ("notes", "")], start=1):
         ws.cell(row=i, column=1, value=k).font = bold
         ws.cell(row=i, column=2, value=v)
@@ -2003,6 +2068,74 @@ def write_template(path: Path | str) -> Path:
         'the report and `effects.csv` carry its change too.',
     ])
 
+    sheet("multipliers", ["what", "as", "exclude_sector", "reason"], [], [
+        '',
+        'LEAVE THIS SHEET EMPTY unless what you want is the MULTIPLIER TABLE',
+        'of the table you already have: the cut that goes in a report.',
+        '',
+        'It builds nothing. You point `table_path` at a table -- yours, a',
+        "client's, an office's, one this engine wrote last week -- and it",
+        'tells you, for every sector: per unit of final demand, how much',
+        'output the whole economy has to make, how much of your quantity',
+        'the sector itself uses (direct), how much it and its entire supply',
+        'chain use (total), and the ratio of the two, which is the',
+        'multiplier.',
+        '',
+        'One row per thing asked for. A row says ONE of two things:',
+        'what               the quantity. Write `all` for everything this',
+        'table can give. Or `output`. Or the name of an',
+        'account on the `satellites` sheet. Or one or',
+        'more VALUE-ADDED ROW LABELS of your table,',
+        'joined with a semicolon -- which is how you ask',
+        'for gross value added on a table that publishes',
+        'wages, surplus and other taxes separately.',
+        '`as`               a name for that column group. Only with `what`.',
+        'exclude_sector     a sector whose multipliers must NOT be',
+        'published. Needs `reason`.',
+        '',
+        'A LABEL THIS TABLE DOES NOT HAVE IS REFUSED, with the labels it',
+        'does have printed, because a multiplier computed on the wrong row',
+        'does not fail: it comes back looking like an answer.',
+        '',
+        'WHY AN EXCLUSION EXISTS AND WHY THE REASON IS REQUIRED. The ONS',
+        'publishes output of 260,111 million for L68A, Owner-Occupiers\'',
+        'Housing, and NO multiplier, because imputed rent has no',
+        'transaction, no employment and no supply chain -- a multiplier for',
+        'it would be an artefact of the imputation. This engine computes one',
+        'happily. So you can withhold it, and you must say why: a blank cell',
+        'with nothing beside it reads as a bug, and then the honest refusal',
+        'looks like a broken one.',
+        '',
+        'AN EMPTY CELL IN THE OUTPUT IS NEVER A ZERO. It is a sector you',
+        'withheld (the reason is in the last column), or a sector whose',
+        'direct coefficient is zero, where no multiplier exists at all.',
+        'Negative multipliers are NOT clamped: on a table with negative',
+        'coefficients they mean something.',
+        '',
+        'TYPE II -- the one that counts the wages being spent again -- is',
+        'NOT asked for here. It comes from two rows on the `project` sheet,',
+        '`type_ii_income_rows` and `type_ii_household_column`. Without them',
+        'every column says type_i, and says it in its own name.',
+        '',
+        'AND IF YOU DO ASK FOR TYPE II: read the uplift, not the order.',
+        'Closed three defensible ways the economy-wide uplift hardly moves',
+        '(1.573 / 1.614 / 1.612) and the distance between industries nearly',
+        'HALVES (1.02-3.10 against 1.20-2.31). The Handbook does not say',
+        'what to divide the consumption column by, so a league table of',
+        'industries by their type II multiplier rests on a choice nobody',
+        'made. The file prints which closure produced the numbers.',
+        '',
+        'THIS SHEET CANNOT SHARE A WORKBOOK with `splits`, `regionalise`,',
+        '`charm`, `targets` or `mixed`. The four build a table and `mixed`',
+        'asks its own question; two questions in one workbook leave it',
+        'unsaid which table was asked and both write the same folder.',
+        '',
+        'You get `multiplier_table.csv` and a `Multipliers` sheet in',
+        '`multipliers.xlsx`. NOT `multipliers.csv` -- that name belongs to',
+        "the `mixed` job and holds a different object, a sector-by-sector",
+        'matrix.',
+    ])
+
     wb.save(path)
     return path
 
@@ -2249,6 +2382,19 @@ def build_mixed(meta: dict, rows: list, base_dir: Path = Path("."),
     from_book = build_satellites(satellites or [], table)
     table.satellites = {**from_file, **from_book}
 
+    # THE MIXED MODEL HAS NO CLOSURE, and until 2026-11-13 a workbook that
+    # declared one here had its two rows dropped without a word. The number
+    # would not have changed -- `mixed_model` never reads `type_ii` -- but a
+    # setting a user wrote by hand and nothing acknowledged is the same defect
+    # whether or not it moves a figure.
+    if (str(meta.get("type_ii_income_rows") or "").strip()
+            or str(meta.get("type_ii_household_column") or "").strip()):
+        defaults_taken.append(
+            "this workbook declares a type II closure and the mixed model has "
+            "none: it solves for output given output, with no household loop "
+            "to close. The two `type_ii` rows are IGNORED here. For type II "
+            "multipliers use the `multipliers` sheet in a separate workbook")
+
     codes = list(table.sector_codes)
     X = np.asarray(table.X, float).ravel()
     delta_x: dict = {}
@@ -2318,11 +2464,183 @@ def build_mixed(meta: dict, rows: list, base_dir: Path = Path("."),
     exogenous = [c for c in codes if c in delta_x]
 
     return {"kind": "mixed", "project_id": project_id,
-            "title": str(meta.get("title")
-                         or f"{project_id} — mixed exogenous/endogenous"),
+            "title": _title(meta, f"{project_id} — mixed exogenous/endogenous"),
             "table": table, "source_file": table_path, "table_kind": kind,
             "exogenous": exogenous, "delta_x": delta_x, "delta_f": delta_f,
             "pct_asked": pct_asked,
+            "notes": str(meta.get("notes") or ""),
+            "defaults_taken": defaults_taken}
+
+
+def build_multipliers(meta: dict, rows: list, base_dir: Path = Path("."),
+                      label: str = "<configuration>", *,
+                      satellites: list | None = None,
+                      offline: bool = False, refresh: bool = False) -> dict:
+    """"Describe this table": the multiplier table of a table already in hand.
+
+    THE SECOND JOB THAT DOES NOT BUILD A TABLE
+    --------------------------------------------
+    It is the job for a table that arrives from somewhere else -- a client's,
+    an office's, one this engine wrote last week -- when the question is not
+    "divide it" or "regionalise it" but "what does it imply?". The arithmetic
+    is `M-067`, verified against the ONS's own published multipliers to
+    7.11e-15, and until now it reached a user only as prose inside one other
+    job's report.
+
+    The sheet is one row per thing asked for, and a row says ONE of two:
+
+    - `what`            the quantity whose multiplier is wanted: `output`,
+                        `all`, the name of a satellite account, or one or more
+                        VALUE-ADDED ROW LABELS joined with `;`. Several labels
+                        are summed first, which is how gross value added is
+                        asked for on a table that publishes its three parts
+                        separately. `as` names the result.
+    - `exclude_sector`  a sector whose multipliers must NOT be published, with
+                        `reason` saying why.
+
+    `all` IS THE DEFAULT AND IT IS EXPLICIT. A sheet whose only row is
+    `what: all` asks for every value-added row and every satellite account, one
+    column group each, plus the output multiplier. Nothing is implied by an
+    empty sheet, because an empty sheet means no job at all.
+
+    THE REASON FOR AN EXCLUSION IS REQUIRED
+    -----------------------------------------
+    `M-067`: the ONS publishes output of GBP 260,111 million for L68A,
+    Owner-Occupiers' Housing, and no multiplier, because imputed rent has no
+    transaction, no employment and no supply chain. "The engine will happily
+    compute one... any multiplier output this project emits must carry the same
+    exclusion rather than fill the cell, and must say why." A blank cell with
+    no reason beside it cannot be told apart from a defect, so the reason is a
+    refusal here rather than a nicety.
+
+    TYPE II IS NOT DECLARED HERE. It is two `project` rows,
+    `type_ii_income_rows` and `type_ii_household_column`, and it stays there:
+    one way to say one thing. Without them the table is type I and says so in
+    every column name.
+    """
+    meta = {str(k).strip().lower(): v for k, v in (meta or {}).items()}
+    defaults_taken: list[str] = []
+    project_id = str(_need(meta, "project_id", "project", 0)).strip()
+
+    table, table_path, kind = _load_declared_table(
+        meta, base_dir, {}, offline, refresh, defaults_taken)
+
+    # Same ADD-OR-REPLACE rule as every other job: a sheet silent about an
+    # account is not asking for the file's to be deleted. It matters more here
+    # than anywhere, because a satellite account IS a multiplier column.
+    from_file = dict(getattr(table, "satellites", None) or {})
+    from_book = build_satellites(satellites or [], table)
+    table.satellites = {**from_file, **from_book}
+    _attach_type_ii(meta, table, kind, defaults_taken)
+
+    codes = list(table.sector_codes)
+    want: list = []
+    names: dict = {}
+    exclude: dict = {}
+    want_all = False
+
+    for r in rows:
+        n = r.get("_row") or "?"
+        what = str(r.get("what") or "").strip()
+        as_name = str(r.get("as") or "").strip()
+        excl = str(r.get("exclude_sector") or "").strip()
+        reason = str(r.get("reason") or "").strip()
+
+        if not what and not excl:
+            raise ConfigError(
+                f"sheet 'multipliers', row {n}: neither `what` nor "
+                f"`exclude_sector`. A row says what to report or what not to "
+                f"publish. Write `all` in `what` for everything this table "
+                f"can give, or delete the row.")
+        if what and excl:
+            raise ConfigError(
+                f"sheet 'multipliers', row {n}: carries `what` ({what!r}) AND "
+                f"`exclude_sector` ({excl!r}). Asking for a quantity and "
+                f"withholding a sector are two different statements, and one "
+                f"row saying both leaves it unsaid whether the sector is "
+                f"withheld from that quantity alone or from all of them. Use "
+                f"two rows; an exclusion applies to the whole table.")
+
+        if excl:
+            if excl not in codes:
+                near = [c for c in codes
+                        if c.upper().startswith(excl.upper()[:2])]
+                raise ConfigError(
+                    f"sheet 'multipliers', row {n}: {excl!r} is not a sector "
+                    f"of {table.table_id} ({len(codes)} sectors). "
+                    + (f"Codes starting alike: {', '.join(near[:6])}."
+                       if near else
+                       f"The first few are: {', '.join(codes[:6])}."))
+            if not reason:
+                raise ConfigError(
+                    f"sheet 'multipliers', row {n}: {excl!r} is excluded and "
+                    f"`reason` is empty. The reason is the whole point of the "
+                    f"exclusion: a blank cell with nothing beside it reads as "
+                    f"a defect, and the case this exists for — the ONS "
+                    f"publishing no multiplier for imputed rent — is only "
+                    f"honest if the file says so. Write why.")
+            if excl in exclude:
+                raise ConfigError(
+                    f"sheet 'multipliers', row {n}: {excl!r} is already "
+                    f"excluded with the reason {exclude[excl]!r}. Two reasons "
+                    f"for one sector are two statements and the file can only "
+                    f"carry one.")
+            exclude[excl] = reason
+            continue
+
+        if what.lower() == "all":
+            want_all = True
+            if as_name:
+                raise ConfigError(
+                    f"sheet 'multipliers', row {n}: `what` is `all` and `as` "
+                    f"is {as_name!r}. `all` produces one column group per "
+                    f"value-added row and per satellite account, each named "
+                    f"after itself, so there is nothing for one name to name.")
+            continue
+
+        # Resolved against THIS table, here, so the refusal names the row of
+        # the sheet the user is looking at. `multiplier_table` would refuse the
+        # same thing later with no row number, which on a sheet of twenty rows
+        # is the difference between a fix and a hunt.
+        from .multipliers import MultiplierError, _rowvalues
+        try:
+            _rowvalues(table, what)
+        except MultiplierError as exc:
+            raise ConfigError(
+                f"sheet 'multipliers', row {n}: {exc}") from None
+        if what in want:
+            raise ConfigError(
+                f"sheet 'multipliers', row {n}: {what!r} is asked for twice. "
+                f"The second row would write a second column group with the "
+                f"same name.")
+        want.append(what)
+        if as_name:
+            names[what] = as_name
+
+    if want_all:
+        for w in list(table.VA_labels) + list(table.satellites or {}):
+            if w not in want:
+                want.append(w)
+
+    if not want:
+        raise ConfigError(
+            f"sheet 'multipliers' on {label} excludes "
+            f"{len(exclude)} sector(s) and asks for nothing. An exclusion says "
+            f"what NOT to publish; it does not say what to publish. Add a row "
+            f"with `all` in `what`.")
+
+    clashes = [v for v in names.values() if v in want and names.get(v) != v]
+    if clashes:
+        raise ConfigError(
+            f"sheet 'multipliers': {clashes[0]!r} is used as an `as` name and "
+            f"is also a quantity asked for in its own right. Two column groups "
+            f"would carry one name.")
+
+    return {"kind": "multipliers", "project_id": project_id,
+            "title": _title(meta, f"{project_id} — multiplier table"),
+            "table": table, "source_file": table_path, "table_kind": kind,
+            "want": want, "names": names, "exclude": exclude,
+            "want_all": want_all,
             "notes": str(meta.get("notes") or ""),
             "defaults_taken": defaults_taken}
 
@@ -2460,12 +2778,13 @@ def plan_workbook(path: Path | str) -> dict:
 
     rows = {name: _rows(sheets, name)
             for name in ("splits", "keys", "scenarios", "profiles", "targets",
-                         "satellites", "mixed")}
+                         "satellites", "mixed", "multipliers")}
     reg = _keyvalue_sheet(sheets, "regionalise")
     ch = _keyvalue_sheet(sheets, "charm")
 
     kind = str(meta.get("table_kind") or "").strip().lower()
-    job = ("mixed" if rows["mixed"] else
+    job = ("multipliers" if rows["multipliers"] else
+           "mixed" if rows["mixed"] else
            "charm" if ch else
            "regionalise" if reg else
            "project" if rows["targets"] else
@@ -2801,6 +3120,77 @@ def plan_workbook(path: Path | str) -> dict:
                 "a value in [0, 1). The report prints what a blind choice "
                 "costs")
 
+    if job == "multipliers":
+        # Every mistake the sheet can state WITHOUT READING THE TABLE. The
+        # labels themselves need the table and are resolved by
+        # `build_multipliers` at load, which is also where the refusal can
+        # print the labels this table does have.
+        seen_what: list = []
+        seen_excl: dict = {}
+        asked = 0
+        for r in rows["multipliers"]:
+            n = r.get("_row") or "?"
+            what = str(r.get("what") or "").strip()
+            as_name = str(r.get("as") or "").strip()
+            excl = str(r.get("exclude_sector") or "").strip()
+            reason = str(r.get("reason") or "").strip()
+            if not what and not excl:
+                gap("multipliers", f"row {n} asks for nothing",
+                    "a row says what to report or what not to publish, and a "
+                    "row saying neither is a row nobody meant to leave",
+                    "`all` in `what`, or delete the row")
+                continue
+            if what and excl:
+                gap("multipliers",
+                    f"row {n} carries `what` ({what}) AND `exclude_sector` "
+                    f"({excl})",
+                    "asking for a quantity and withholding a sector are two "
+                    "different statements, and one row saying both leaves it "
+                    "unsaid whether the sector is withheld from that quantity "
+                    "or from all of them",
+                    "two rows; an exclusion applies to the whole table")
+                continue
+            if excl:
+                if not reason:
+                    gap("multipliers",
+                        f"row {n} excludes {excl} and gives no `reason`",
+                        "the reason IS the exclusion: a blank cell with "
+                        "nothing beside it reads as a defect, and then an "
+                        "honest refusal looks like a broken one",
+                        "why that sector's multiplier must not be published")
+                if excl in seen_excl:
+                    gap("multipliers",
+                        f"row {n} excludes {excl}, already excluded on row "
+                        f"{seen_excl[excl]}",
+                        "two reasons for one sector are two statements and the "
+                        "file can carry one",
+                        "one row per excluded sector")
+                seen_excl[excl] = n
+                continue
+            if what.lower() == "all":
+                asked += 1
+                if as_name:
+                    gap("multipliers",
+                        f"row {n} is `all` and also names it {as_name!r}",
+                        "`all` writes one column group per value-added row and "
+                        "per satellite account, each named after itself, so "
+                        "there is nothing for one name to name",
+                        "`as` empty on an `all` row")
+                continue
+            asked += 1
+            if what in seen_what:
+                gap("multipliers", f"row {n} asks for {what!r} twice",
+                    "the second row would write a second column group under "
+                    "the same name",
+                    "one row per quantity")
+            seen_what.append(what)
+        if not asked:
+            gap("multipliers",
+                f"{len(seen_excl)} sector(s) excluded and nothing asked for",
+                "an exclusion says what NOT to publish; it does not say what "
+                "to publish",
+                "a row with `all` in `what`")
+
     if job == "mixed":
         # Every mistake the sheet can state WITHOUT reading the table, said
         # here so `--plan` catches it in one pass. The codes themselves need
@@ -2908,7 +3298,25 @@ def plan_workbook(path: Path | str) -> dict:
             "have": {"table_kind": kind or None, "job": job,
                      "splits": len(rows["splits"]), "keys": len(rows["keys"]),
                      "scenarios": len(rows["scenarios"]),
-                     "profiles": len(rows["profiles"])}}
+                     "profiles": len(rows["profiles"]),
+                     "mixed": len(rows["mixed"]),
+                     "multipliers": len(rows["multipliers"]),
+                     "satellites": len(rows["satellites"]),
+                     # WHICH COUNTS ARE WORTH PRINTING FOR THIS JOB. The one
+                     # summary line used to name splits, keys and profiles
+                     # whatever the job was, so a multiplier run advertised
+                     # "3 key row(s)" -- template examples, for a job that
+                     # cannot use a key. Naming a sheet the run will not read
+                     # is a small lie in the first line the user sees.
+                     "counts_to_show": {
+                         "multipliers": ("multipliers", "satellites"),
+                         "mixed": ("mixed", "satellites"),
+                         "regionalise": ("satellites",),
+                         "charm": (),
+                         "project": ("targets", "satellites"),
+                         "split": ("splits", "keys", "profiles"),
+                     }.get(job, ("splits", "keys", "profiles")),
+                     "targets": len(rows["targets"])}}
 
 
 def build_satellites(rows: list[dict], table) -> dict:
@@ -3001,6 +3409,40 @@ def build_satellites(rows: list[dict], table) -> dict:
             source=str(acc["source"]).strip() or "not stated",
             source_year=year)
     return out
+
+
+def _attach_type_ii(meta: dict, table, kind: str,
+                    defaults_taken: list) -> None:
+    """Hang the declared type II closure on the table, for ANY job that can
+    use one.
+
+    EXTRACTED 2026-11-13 BECAUSE IT WAS NOT SHARED. This lived inside
+    `build_config` alone, so a workbook that declared
+    `type_ii_income_rows` and `type_ii_household_column` and then asked for a
+    multiplier table got type I and **nothing said the two rows had been
+    ignored**. Two settings a user wrote by hand, dropped in silence, on the
+    one figure the whole job exists to produce. The sixth job's first real run
+    found it.
+
+    The `eu_mrio` refusal travels with it: the label lookup below would ACCEPT
+    `VA` on that table because the row exists -- it is simply not income -- so
+    the refusal has to be by kind and has to be here rather than in one caller.
+    """
+    asked = (str(meta.get("type_ii_income_rows") or "").strip()
+             or str(meta.get("type_ii_household_column") or "").strip())
+    if kind == "eu_mrio" and asked:
+        raise ConfigError(
+            f"a type II closure cannot be built on this table: "
+            f"{_EU_MRIO_NO_TYPE_II}. Remove both type_ii rows; the type I "
+            f"results and any satellite accounts are unaffected.")
+    spec = _type_ii_spec(meta, table)
+    if spec:
+        table.type_ii = spec
+    elif getattr(table, "type_ii", None):
+        defaults_taken.append(
+            "the type II closure came with the table and this workbook does "
+            "not mention it; it is kept, and the report says which rows it "
+            "closes on")
 
 
 def _type_ii_spec(meta: dict, table) -> dict:

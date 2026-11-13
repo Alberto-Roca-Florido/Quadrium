@@ -280,10 +280,14 @@ def _plan(rep: dict, as_json: bool) -> int:
     have = rep["have"]
 
     print(f"\n  {Path(rep['path']).name}")
+    # Only the sheets THIS job reads. `plan_workbook` says which; printing a
+    # fixed three meant a multiplier run announced key rows it would never
+    # look at.
+    shown = have.get("counts_to_show") or ("splits", "keys", "profiles")
+    counts = ", ".join(f"{have.get(k, 0)} {k} row(s)" for k in shown) \
+        or "no job sheet filled in"
     print(f"  job: {have.get('job') or 'none named'} · "
-          f"table_kind: {have.get('table_kind') or 'not set'} · "
-          f"{have.get('splits', 0)} split row(s), {have.get('keys', 0)} key "
-          f"row(s), {have.get('profiles', 0)} profile row(s)")
+          f"table_kind: {have.get('table_kind') or 'not set'} · {counts}")
 
     if blocking:
         print(f"\n  {len(blocking)} thing(s) stop it running:\n")
@@ -799,6 +803,26 @@ def main(argv=None) -> int:
             res, table, args.outputs, cfg["project_id"],
             Path(cfg["source_file"]).name, Path(cfg["activity_file"]).name)
 
+    # The SIXTH job, and the second that only asks: the multiplier table of a
+    # table already in hand. `build_multipliers` has resolved every label
+    # against this table, so by here nothing can be asked that it cannot
+    # answer. `M-067`.
+    if cfg.get("kind") == "multipliers":
+        from .multipliers import MultiplierError, multiplier_table
+        table = cfg["table"]
+        try:
+            mt = multiplier_table(table, rows=cfg["want"],
+                                  names=cfg["names"], exclude=cfg["exclude"])
+        except MultiplierError as exc:
+            print(f"The multiplier table refused:\n\n  {exc}\n",
+                  file=sys.stderr)
+            return 2
+        print(f"Table   : {table.table_id} — {table.n} sectors, {table.unit}")
+        if args.check:
+            print(_multiplier_report(mt, cfg, check=True))
+            return 0
+        return _write_multipliers(mt, cfg, args.outputs)
+
     # The FIFTH job, and the first that does not build a table: it asks a
     # question about one. `build_mixed` has already refused every scenario the
     # sheet can state wrongly, so by here the run is one the model admits.
@@ -909,6 +933,18 @@ def _write_regionalisation(res, table, out_root, name, national_name,
                      + (f", delta = {res.delta:g}" if res.delta is not None
                         else "") + ". Estimated, not observed:")
 
+    # THE MULTIPLIER TABLE OF THE REGION, unasked for. It is the number a
+    # regionalisation is usually run to get, and until 2026-11-13 this job
+    # wrote a coefficient matrix and stopped: the user had to form the inverse
+    # themselves or run a second workbook. The report already carries what is
+    # known to be wrong with it -- the quotient family overstates the local
+    # multiplier -- and `multiplier_table.csv` carries the same caveat in its
+    # own comment lines, because the two files travel separately.
+    from .export import write_multipliers_beside
+    said = write_multipliers_beside(regional, out)
+    if said:
+        print(f"          no multiplier_table.csv for the region: {said}")
+
     with (out / "implicit_imports.csv").open("w") as fh:
         fh.write("# interregional imports the scaling implies, CORE_039 p. 292\n")
         fh.write("sector_code,implicit_imports\n")
@@ -941,6 +977,11 @@ def _write_regionalisation(res, table, out_root, name, national_name,
         "- `implicit_imports.csv` — the interregional imports the scaling "
         "implies, by product. This is the quantity that makes the method's "
         "trade assumption inspectable rather than implicit.",
+        ("- `multiplier_table.csv` and `multipliers.xlsx` — the region's own "
+         "output multipliers, and for every value-added row and satellite "
+         "account the direct coefficient, the total effect and the "
+         "multiplier. Type I: there is no wages row to close on, which is "
+         "said above."),
         ("- `regional_table.xlsx` — the region as a table, in the format this "
          "engine reads back. Run it through `--check`, split a sector of it, "
          "or point `--national` at it. Its final demand is one column and its "
@@ -1107,6 +1148,131 @@ def _charm(args) -> int:
 
     return _write_charm(res, table, args.outputs, args.name,
                         Path(args.national).name, Path(args.charm).name)
+
+
+def _multiplier_report(mt, cfg, check: bool = False) -> str:
+    """The report for the multiplier table: what it is, and what it is not.
+
+    THE NUMBERS ARE IN THE CSV AND THE WORKBOOK, NOT HERE. This document says
+    the things a column of figures cannot: which type, on what price basis,
+    from which transformation model, how many cells are empty and why, and --
+    on a table this engine itself built -- what is known to be wrong with the
+    multipliers it just produced. `run_report_claims.py` ties every figure
+    below to the validator that measures it.
+    """
+    p = mt.provenance
+    lines = [f"# {cfg['title']}", "",
+             f"Table: **{mt.table_id}** — {mt.n} sectors, {p['unit']}",
+             f"Source: {p['source']}", "",
+             "## What you are holding", "",
+             "Per unit of final demand for each sector: the output the whole "
+             "economy must make, and for every quantity you asked for, what "
+             "the sector itself uses (direct), what it and its whole supply "
+             "chain use (total), and the ratio of the two.", "",
+             f"- **Price basis.** {p['price_basis']}",
+             f"- **Transformation.** {p['transformation']}",
+             f"- **Data status.** {p['data_status']}", ""]
+
+    lines += ["## Columns", "",
+              "| quantity | kind | unit | no multiplier | source |",
+              "|---|---|---|---|---|",
+              f"| output | output | {mt.output.unit} | "
+              f"{mt.output.undefined} | the table itself |"]
+    for name, r in mt.rows.items():
+        summed = (f" (sum of {len(r.labels_summed)} rows)"
+                  if len(r.labels_summed) > 1 else "")
+        lines.append(f"| {name}{summed} | {r.kind} | {r.unit} | "
+                     f"{r.undefined} | {r.source or '—'} |")
+    lines += ["", "`no multiplier` counts the sectors whose direct "
+              "coefficient is zero. There is no multiplier for them — not a "
+              "zero one — and the cell is left empty.", ""]
+
+    if mt.closure:
+        c = mt.closure
+        lines += [
+            "## Type II — and read the uplift, not the order", "",
+            f"Closed on {'; '.join(c['income_rows'])}, spent through "
+            f"**{c['household']}**. Household consumption is "
+            f"{c['propensity']:.1%} of that income.", "",
+            c["read_the_uplift_not_the_order"], ""]
+    else:
+        lines += [
+            "## Type II does not come, and why", "",
+            "Every multiplier here is **type I**: it stops at the supply "
+            "chain. The induced effect — wages being spent, that spending "
+            "being somebody's output — needs two things this workbook did not "
+            "say: `type_ii_income_rows` and `type_ii_household_column` on the "
+            "`project` sheet. On the UK 2023 table type II averages **1.573×** "
+            "type I, so this is not a rounding difference: a type I "
+            "multiplier quoted as *the* multiplier understates by more than "
+            "half. `M-067`, `OQ-T-05`.", ""]
+
+    lf = mt.leontief
+    lines += [
+        "## The inverse these numbers are column sums of", "",
+        f"- Spectral radius **{lf['spectral_radius']:.4f}** — below 1, so the "
+        f"economy is productive and the series converges."
+        if lf["spectral_radius"] < 1 else
+        f"- ⚠ Spectral radius **{lf['spectral_radius']:.4f}**, which is NOT "
+        f"below 1. The Leontief series does not converge and these "
+        f"multipliers do not mean what they usually mean.",
+        f"- Condition number **{lf['condition_number']:.3g}**.",
+        f"- Negative coefficients in `A`: **{lf['n_negative_coefficients']}**; "
+        f"negative entries in the inverse: **{lf['n_negative_inverse']}**"
+        + (f", all in column(s) {', '.join(lf['negative_inverse_columns'])}"
+           if lf["negative_inverse_columns"] else "")
+        + ". Negatives are not errors and are not clamped — `M-067`, "
+          "`A_core_accounting_spec.md` §A.8.1.", ""]
+
+    if mt.suppressed:
+        lines += ["## Not published, and why", "",
+                  "| sector | reason |", "|---|---|"]
+        lines += [f"| {c} | {w} |" for c, w in sorted(mt.suppressed.items())]
+        lines += [""]
+
+    # WHAT IS MEASURED TO BE WRONG WITH THESE. Taken from `known_wrong`, the
+    # same function the CSV's comment lines use, so the report and the file
+    # cannot drift apart. The first version computed it here only, while a
+    # comment claimed the file carried it too.
+    from .multipliers import known_wrong
+    wrong = known_wrong(p)
+    if wrong:
+        lines += ["## What is known to be wrong with these", ""] + \
+                 [f"- {w}" for w in wrong] + [""]
+
+    if check:
+        lines += ["---", "",
+                  "Nothing was written: this was `--check`.", ""]
+    return "\n".join(lines)
+
+
+def _write_multipliers(mt, cfg, out_root) -> int:
+    """`multiplier_table.csv`, `multipliers.xlsx` and `report.md`."""
+    from .export import write_multiplier_table, write_multiplier_xlsx
+
+    out = Path(out_root) / (cfg.get("project_id") or "multipliers")
+    out.mkdir(parents=True, exist_ok=True)
+    csv_path = write_multiplier_table(mt, out / "multiplier_table.csv")
+    xlsx = write_multiplier_xlsx(mt, out / "multipliers.xlsx")
+    (out / "report.md").write_text(_multiplier_report(mt, cfg),
+                                   encoding="utf-8")
+
+    print(f"Rows    : {mt.n} sectors × {len(mt.column_names())} figures")
+    print(f"Asked   : output, plus {len(mt.rows)} quantit"
+          f"{'y' if len(mt.rows) == 1 else 'ies'}"
+          + (f"; {len(mt.suppressed)} sector(s) withheld"
+             if mt.suppressed else ""))
+    if mt.output_type_ii is None:
+        print("Type    : I only — the `project` sheet named no closure")
+    else:
+        print(f"Type    : I and II — uplift "
+              f"{float(np.nanmean(mt.induced_uplift)):.3f}× on average. "
+              f"Read the uplift, not the order")
+    print(f"Wrote   : {csv_path.name}"
+          + (f", {xlsx.name}" if xlsx else " (no openpyxl: no workbook)")
+          + ", report.md")
+    print(f"          {out}")
+    return 0
 
 
 def _mixed_report(res, cfg, table, check: bool = False) -> str:
@@ -1426,13 +1592,17 @@ def _write_charm(res, table, out_root, name, national_name,
         "where `eps` was measured. Kept separate so nothing reads as though "
         "it had been measured for the region.",
         "",
-        "There is no `regional_table.xlsx`, no `coefficients.csv` and no "
-        "`implicit_imports.csv` here, and that is not an omission. CHARM "
+        "There is no `regional_table.xlsx`, no `coefficients.csv`, no "
+        "`implicit_imports.csv` and **no `multiplier_table.csv`** here, and "
+        "that is not an omission. CHARM "
         "estimates trade, not a technology: the regional coefficient matrix it "
         "would imply is the nation's by assumption, and a table with one "
         "residual final-demand column would net exports against imports and "
-        "destroy the one thing this method computes. Use `--regionalise` for a "
-        "regional table.",
+        "destroy the one thing this method computes. A multiplier is a column "
+        "sum of the inverse of that matrix, so a multiplier table here would "
+        "be the NATION's multipliers with a region's name on them — which is "
+        "the one reading `M-075` says the two methods must not be allowed to "
+        "share. Use `--regionalise` for a regional table and its multipliers.",
         "",
         f"Cross-hauling is {ch_share:.1f} % of estimated trade volume. The "
         f"market-clearing residue of eq. (13) is at most "

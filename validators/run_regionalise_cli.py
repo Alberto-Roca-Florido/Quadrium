@@ -117,6 +117,18 @@ def main_() -> int:
               wrote >= {"coefficients.csv", "implicit_imports.csv", "report.md",
                         "assumption_ledger.json"},
               ", ".join(sorted(wrote)))
+        # ADDED 2026-11-13. Until then this job wrote a coefficient matrix and
+        # stopped: the multiplier is what a regionalisation is usually run to
+        # get, and the user had to form the inverse themselves. The set above
+        # is checked with `>=`, so a new output would not have failed it --
+        # which is why the two names are asserted here rather than assumed.
+        check("and the region's own multiplier table, which this job used to "
+              "leave the user to compute",
+              {"multiplier_table.csv", "multipliers.xlsx"} <= wrote,
+              "type I: a quotient-regionalised table has no wages row to "
+              "close on, and the report says so. The file carries the "
+              "overstatement warning in its own comment lines because it "
+              "travels separately from the report")
 
         A = np.loadtxt(d / "coefficients.csv", delimiter=",", comments="#")
         check("the coefficients are the right shape and nowhere above the "

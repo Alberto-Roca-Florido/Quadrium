@@ -723,19 +723,27 @@ producing a result. See §7.
 quadrium --template my_config.xlsx
 ```
 
-That writes a blank workbook with nine sheets. Every sheet carries its own
+That writes a blank workbook with ten sheets. Every sheet carries its own
 instructions at the bottom, in grey. What follows is the same thing with more
 room to explain.
 
-**A workbook describes one job, not two.** Five of the nine sheets below are
-the split — fill in `splits` to divide a sector. The other four are the other
-four jobs, one sheet each: `regionalise` is
-[§9](#9-estimate-a-regions-table), `charm` is
-[§10](#10-estimate-a-regions-two-way-trade), `mixed` is
-[§11](#11-fix-some-industries-output-and-solve-for-the-rest), and `targets`
-projects a supply-use pair to another year. Fill in exactly one. A workbook
-with two of them filled in describes two runs and is refused rather than
-answered half way, and one with none of them is refused rather than run empty.
+**A workbook describes one job, not two.** There are six jobs and each has one
+sheet that names it. Four of them BUILD a table:
+
+- `splits` — divide a sector. The rest of this section.
+- `regionalise` — [§9](#9-estimate-a-regions-table).
+- `charm` — [§10](#10-estimate-a-regions-two-way-trade).
+- `targets` — project a supply-use pair to another year.
+
+And two only ASK about one:
+
+- `mixed` — [§11](#11-fix-some-industries-output-and-solve-for-the-rest).
+- `multipliers` — [§12](#12-the-multiplier-table-of-a-table-you-already-have).
+
+Fill in exactly one. A workbook with two of them filled in describes two runs
+and is refused rather than answered half way, and one with none of them is
+refused rather than run empty. The other four sheets — `keys`, `scenarios`,
+`profiles`, `satellites` — support whichever job you named.
 
 ### Sheet `project`
 
@@ -1020,6 +1028,14 @@ is not a clean run either.
 `outputs/<project_id>/report.md`, alongside `original_table.csv`,
 `assumption_ledger.json`, `project.json`, and one folder per scenario holding
 the disaggregated table.
+
+Each scenario folder also holds **`multiplier_table.csv` and
+`multipliers.xlsx`** — the whole multiplier cut of the table that scenario
+built, in the same format [§12](#12-the-multiplier-table-of-a-table-you-already-have)
+describes, written without being asked for. Before 2026-11-13 these numbers
+reached you only as the prose tables below, so a reader who wanted the cut
+retyped one. ⚠ **With no `profiles` sheet every subsector carries its parent's
+multiplier**, and that file says so in its own first lines as well as here.
 
 The report has seven parts. In order of how much they should worry you:
 
@@ -1438,6 +1454,12 @@ method — or after `--name`, if you would rather choose it:
 - `regional_table.xlsx` — the region as a table rather than a matrix, in the
   format this engine reads back, so it can be split, projected or diagnosed
   like any other. Written only if `openpyxl` is installed.
+- `multiplier_table.csv` and `multipliers.xlsx` — the region's own
+  multipliers: per sector the output multiplier, and for every value-added row
+  and satellite account the direct coefficient, the total effect and the
+  multiplier. Type I, because there is no wages row to close on. The
+  overstatement above is repeated inside that file, since it travels
+  separately from this report.
 - `report.md` and `assumption_ledger.json` — what was done and what it rests on.
 
 And you get, printed whether you asked or not, what the method is known to get
@@ -1673,7 +1695,104 @@ the accounting identity, and both are tested.
 
 ---
 
-## 12. What it will not do
+## 12. The multiplier table of a table you already have
+
+This is the cut that goes in a report, and it is the one job that **builds
+nothing**. You point the workbook at a table — yours, a client's, an office's,
+one this engine wrote last week — and it tells you what that table implies.
+
+Fill in the `multipliers` sheet. One row per thing you want:
+
+| what | as | exclude_sector | reason |
+|---|---|---|---|
+| `all` | | | |
+| | | `L68A` | the ONS publishes no multiplier for imputed rent |
+
+`all` is the usual answer: it gives the output multiplier, plus every
+value-added row and every satellite account, one column group each. Instead of
+`all` you can write `output`, the name of an account on the `satellites` sheet,
+or **one or more of your table's own value-added row labels joined with a
+semicolon** — which is how you ask for gross value added on a table that
+publishes wages, operating surplus and other taxes separately:
+
+```
+Compensation of employees;Gross operating surplus and mixed income;Other taxes less subsidies on production
+```
+
+Put a name in `as` and the columns carry that name instead.
+
+You get `multiplier_table.csv`, a `Multipliers` sheet in `multipliers.xlsx`,
+and `report.md`. Per sector: the output multiplier, and for every quantity, the
+**direct** coefficient (what the sector itself uses per unit of its own
+output), the **effect** (what it and its whole supply chain use), and the
+**multiplier**, which is the effect over the direct. That is `UNH_20` eq. (45)
+and (46), and `validators/run_multipliers.py` checks it against the ONS's own
+published `Multipliers` and `Effects` sheets: **1,434 figures, worst error
+7.11e-15**. `validators/run_multiplier_table.py` then checks the file you are
+handed, which is a different claim.
+
+**It is not called `multipliers.csv`.** That name belongs to section 11 and
+holds a different object — a sector-by-sector matrix. Two unlike files under
+one name is how a reader ends up quoting the wrong one.
+
+### Three things this file says that a column of numbers cannot
+
+**Every multiplier here is type I unless its column says `type_ii`.** Type I
+stops at the supply chain. Type II adds the wages being spent again. On the UK
+2023 table type II averages **1.573×** type I, so a type I multiplier quoted as
+*the* multiplier understates by more than half. Nothing in this engine prints
+the word without the type, and the writer refuses a header that tries.
+
+**Type II comes only if you ask for it, on the `project` sheet** — section 4,
+`type_ii_income_rows` and `type_ii_household_column`. And when it comes: **read
+the uplift, not the order.** Closed three defensible ways the economy-wide
+uplift hardly moves (1.573, 1.614, 1.612) while the distance between industries
+nearly halves (1.02–3.10 against 1.20–2.31) — `validators/run_type_ii_multipliers.py`
+measured all three closures. The Handbook does not say what to divide the
+consumption column by, so a league table of industries by their type II
+multiplier rests on a choice nobody made. The file prints which closure
+produced the numbers.
+
+**An empty cell is never a zero.** It is one of two things, and they are
+different. Either you withheld that sector — the reason is in the last column —
+or its direct coefficient is zero, where no multiplier exists at all. Calling
+that zero would say the quantity is perfectly absent rather than that there is
+nothing to divide by. Negative multipliers are **not** clamped either: on a
+table with negative coefficients they mean something.
+
+### Why you would withhold a sector
+
+Because sometimes the office that published the table refuses to, and it is
+right. The ONS publishes output of **£260,111 million** for L68A,
+Owner-Occupiers' Housing, and **no multiplier**: imputed rent has no
+transaction, no employment and no supply chain, so a multiplier for it is an
+artefact of the imputation. This engine computes one happily — 1.0828 — and
+that industry is also the only column with negative entries in the inverse. So
+you can withhold it, and the sheet **requires** the reason: a blank cell with
+nothing beside it reads as a bug, and then an honest refusal looks like a
+broken one. (`validators/run_multiplier_table.py` pins both figures and checks
+that withholding a sector moves nobody else's multiplier.)
+
+### What the table says about where it came from
+
+A multiplier is only comparable with another one computed on the same price
+basis, the same domestic treatment and the same transformation model. The
+report prints all three from the table's own description — and writes
+**NOT SPECIFIED** where the table is silent, which is often, because nothing in
+the numbers tells you. It does not guess.
+
+And if the table was built by this engine, the report says what is known to be
+wrong with its multipliers: a split with no input profile gives every subsector
+the **same** multiplier as its parent
+(`validators/run_split_backtest.py`), and a regionalised table from the
+quotient family **overstates** the local multiplier — by how much, and what
+else that estimate leaves out, is the list
+[§9](#what-this-is-known-to-get-wrong) already prints, and the figures are not
+repeated here because a number kept in two places drifts in one of them.
+
+---
+
+## 13. What it will not do
 
 - **Say WHERE a region's trade goes.** Section 10 estimates how much a region
   ships out and takes in, both at once — the gross two-way flow a location

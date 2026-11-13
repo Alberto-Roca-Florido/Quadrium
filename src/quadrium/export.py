@@ -482,3 +482,228 @@ def write_interchange_xlsx(table: IOTable, path: Path, *,
                               derived_from=derived_from)
     wb.save(path)
     return path
+
+
+# ---------------------------------------------------------------------------
+# The multiplier table
+# ---------------------------------------------------------------------------
+
+#: What rule 1 of `multipliers.py` forbids: the word on its own. A header that
+#: says `multiplier` and names no type is a silent type II claim, understating
+#: by more than half on the one table where both are known (1.573x). Checked
+#: here rather than trusted, because this writer is the last thing that runs
+#: before the file is mailed to somebody.
+_TYPE_TAGS = ("_type_i", "_type_ii")
+
+
+def _multiplier_header(mt) -> list:
+    head = (["sector_code", "sector_label"] + list(mt.column_names())
+            + ["suppressed_reason"])
+    bad = [h for h in head if "multiplier" in h.lower()
+           and not any(tag in h.lower() for tag in _TYPE_TAGS)]
+    if bad:
+        # One of the engine's OWN refusal types, not a bare ValueError: the
+        # refusal census only counts the registered ones, and a rule nobody
+        # can see the coverage of is a rule nobody maintains.
+        from .multipliers import MultiplierError
+        raise MultiplierError(
+            f"these columns say 'multiplier' and do not say which type: "
+            f"{bad}. M-067: an output that says 'multiplier' without saying "
+            f"'type I' is making the larger claim silently, and understating "
+            f"by more than half. Name the type or do not write the column.")
+    return head
+
+
+def _multiplier_notes(mt) -> list:
+    """The sentences that must travel with the numbers, as plain lines.
+
+    Shared by the CSV's `#` comments and the workbook's own header block, so
+    the two cannot drift: a caveat present in one file and absent from the
+    other is worse than one absent from both, because the reader who has the
+    silent copy believes there is nothing to know.
+    """
+    p = mt.provenance
+    lines = [
+        f"Quadrium — multiplier table for {mt.table_id}",
+        f"{p['country']} {p['year']} · {p['unit']} · {p['classification']}",
+        f"Source: {p['source']}",
+        f"Price basis: {p['price_basis']}",
+        f"Transformation: {p['transformation']}",
+        f"Data status: {p['data_status']}",
+        "",
+        "EVERY MULTIPLIER HERE IS TYPE I unless its column says type_ii.",
+        "  direct      d = v / x        what one unit of own output uses",
+        "  effect      e = d' L         it and its whole supply chain",
+        "  multiplier  m = e / d        total over direct",
+        "UNH_20 eq. (45) and (46); M-067, verified against the ONS's own",
+        "published Multipliers and Effects sheets — 1,434 figures, worst",
+        "error 7.11e-15.",
+        "",
+        "AN EMPTY CELL IS NOT A ZERO. It is either a sector whose multipliers",
+        "are deliberately not published (the reason is in the last column) or",
+        "a sector whose direct coefficient is zero, where no multiplier",
+        "exists. Negative multipliers are not clamped: on a table with",
+        "negative coefficients they are meaningful.",
+    ]
+    if mt.closure:
+        c = mt.closure
+        lines += [
+            "",
+            "TYPE II — AND READ THE UPLIFT, NOT THE ORDER.",
+            f"Closed on: {'; '.join(c['income_rows'])}",
+            f"Household column: {c['household']}",
+            f"Consumption as a share of that income: {c['propensity']:.3f}",
+            c["read_the_uplift_not_the_order"],
+        ]
+    lf = mt.leontief
+    lines += [
+        "",
+        "THE INVERSE THESE NUMBERS ARE COLUMN SUMS OF:",
+        f"  condition number {lf['condition_number']:.3g}, spectral radius "
+        f"{lf['spectral_radius']:.4f} (must be below 1 for a productive "
+        f"economy)",
+        f"  negative coefficients in A: {lf['n_negative_coefficients']}; "
+        f"negative entries in the inverse: {lf['n_negative_inverse']}"
+        + (f", in column(s) {', '.join(lf['negative_inverse_columns'])}"
+           if lf["negative_inverse_columns"] else ""),
+    ]
+    if mt.suppressed:
+        lines += ["", "NOT PUBLISHED, AND WHY:"] + [
+            f"  {code}: {why}" for code, why in sorted(mt.suppressed.items())]
+
+    # WHAT IS MEASURED TO BE WRONG WITH THESE, from the table's own lineage.
+    # In the file and not only in the report: the two travel separately, and a
+    # caveat present in one and absent from the other is worse than absent
+    # from both, because the reader holding the silent copy believes there is
+    # nothing to know.
+    from .multipliers import known_wrong
+    wrong = known_wrong(mt.provenance)
+    if wrong:
+        lines += ["", "WHAT IS KNOWN TO BE WRONG WITH THESE:"]
+        for w in wrong:
+            lines += ["  " + w]
+    return lines
+
+
+def _multiplier_cells(mt, i: int) -> list:
+    """One sector's numbers, in `column_names()` order. NaN leaves as blank."""
+    def f(v, places=6):
+        return "" if v is None or not np.isfinite(v) else f"{v:.{places}f}"
+    cells = [f(mt.output.multiplier[i])]
+    if mt.output_type_ii is not None:
+        cells += [f(mt.output_type_ii[i]), f(mt.induced_uplift[i])]
+    for r in mt.rows.values():
+        cells += [f(r.direct[i], 9), f(r.effect[i], 9), f(r.multiplier[i]),
+                  f(r.indirect_share[i])]
+    return cells
+
+
+def write_multiplier_table(mt, path: Path) -> Path:
+    """`multiplier_table.csv`: one row per sector, every multiplier stated.
+
+    DELIBERATELY NOT CALLED `multipliers.csv`. That name is taken, by the mixed
+    model's `M^-1 N` — a sector-by-sector MATRIX saying how much each unknown
+    moves per unit of each known value, which is a different object with
+    different units. Two unlike files under one name in neighbouring folders is
+    the failure this project keeps finding: an artefact that is confidently
+    wrong. `docs/GUIDE.md` says which is which in one line.
+
+    Written with the `csv` module, not with f-strings and `_q`. The UK 2023
+    table has a sector whose CODE CONTAINS A COMMA — `F41, F42  & F43` — and
+    `_q` quotes a comma but does not double an embedded quotation mark, so it
+    is right for that code and wrong for a label holding `"`. The stdlib
+    writer is right for both, and the mixed-model writer already chose it for
+    the same reason on 2026-11-12.
+    """
+    import csv
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    head = _multiplier_header(mt)
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        for ln in _multiplier_notes(mt):
+            w.writerow([f"# {ln}" if ln else "#"])
+        w.writerow(head)
+        for i, code in enumerate(mt.codes):
+            w.writerow([code, mt.labels[i]] + _multiplier_cells(mt, i)
+                       + [mt.suppressed.get(code, "")])
+    return path
+
+
+def write_multiplier_xlsx(mt, path: Path):
+    """The same table as a workbook sheet, ready to paste into a report.
+
+    Returns None when openpyxl is absent, like `write_xlsx`: the CSV is the
+    reproducible artefact and the workbook is the convenience.
+    """
+    try:
+        import openpyxl
+        from openpyxl.styles import Alignment, Font
+    except ImportError:
+        return None
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    head = _multiplier_header(mt)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Multipliers"
+    bold = Font(bold=True)
+
+    notes = _multiplier_notes(mt)
+    for ln in notes:
+        ws.append([ln])
+    ws["A1"].font = bold
+    ws.append([])
+    first = len(notes) + 2
+    ws.append(head)
+    for c in range(1, len(head) + 1):
+        cell = ws.cell(row=first + 1, column=c)
+        cell.font = bold
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+    for i, code in enumerate(mt.codes):
+        row = [code, mt.labels[i]]
+        for v in _multiplier_cells(mt, i):
+            row.append(float(v) if v != "" else None)
+        row.append(mt.suppressed.get(code, ""))
+        ws.append(row)
+    ws.freeze_panes = ws.cell(row=first + 2, column=3)
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = 46
+    wb.save(path)
+    return path
+
+
+def write_multipliers_beside(table, out) -> str | None:
+    """Write the multiplier table of a table a BUILDING job just produced.
+
+    THE SAME FILES BY THE SAME WRITER, so there is one format and not one per
+    job. The `multipliers` sheet is the door for a table you already hold; this
+    is the same object handed over without being asked for, because a user who
+    has just had a table built does not then want to run a second workbook to
+    learn what it implies.
+
+    Every value-added row the table has and every satellite account it carries,
+    each as its own column group -- the same thing the sheet's `all` asks for.
+
+    IT LIVES HERE AND NOT IN `cli.py` because `project.py` calls it too, and a
+    writer in `cli` that `project` imports is a cycle waiting to be a problem.
+    Writers do not print, so a refusal comes back as a STRING and the caller
+    says it.
+
+    A REFUSAL DOES NOT FAIL THE RUN AND IS NOT SWALLOWED. A regionalised or
+    projected table can come out non-productive, or with a singular `I - A`;
+    the table itself is still the job's output and still worth writing. So the
+    reason no multiplier table came is returned and printed, because returning
+    nothing would leave a user hunting for a file the guide promises.
+    """
+    from .multipliers import MultiplierError, multiplier_table
+    try:
+        mt = multiplier_table(table)
+    except (MultiplierError, ValueError, np.linalg.LinAlgError) as exc:
+        return str(exc)
+    out = Path(out)
+    write_multiplier_table(mt, out / "multiplier_table.csv")
+    write_multiplier_xlsx(mt, out / "multipliers.xlsx")
+    return None

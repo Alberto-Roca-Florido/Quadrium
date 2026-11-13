@@ -6432,3 +6432,166 @@ def test_the_trade_declaration_reads_back_and_refuses():
                 _block(imports_column=None,
                        indirect_allocation=False)).trade_vectors(),
             "BY PRODUCT")
+
+
+# ---------------------------------------------------------------------------
+# The refusals of `mixed` and `multipliers` that NOTHING reached.
+#
+# Added 2026-11-13, when the refusal census was repaired. The census had been
+# blind to both modules -- `sweep_refusals.py` watched a hand-written list of
+# eleven modules and these two were not on it -- so their forty-one refusals
+# were unrecordable while the run reported a number with confidence. With the
+# blindness fixed, the gap it hid is real: the module-level refusals of the
+# fifth and sixth jobs had no case anywhere. These are those cases.
+#
+# They are deliberately the ARGUMENT checks, the ones a workbook cannot reach
+# because `config.py` catches the same mistake first and says it in the user's
+# own words. That does not make them decoration: they are what stands between
+# a caller of the Python API and a silently wrong table.
+# ---------------------------------------------------------------------------
+
+def test_the_mixed_model_refuses_what_a_caller_can_get_wrong():
+    """Every `MixedModelError` the workbook route cannot reach."""
+    # `check` only APPENDS to FAILURES; under pytest a failed check
+    # prints and passes. These two tests are about refusals that had no
+    # case at all, so a case that cannot fail would be worse than none.
+    _before = len(FAILURES)
+    from quadrium.mixed import MixedModelError, mixed_model, mixed_model_from_table
+
+    A = np.array([[0.1, 0.2], [0.3, 0.1]])
+
+    def refuses(label, fn, fragment):
+        try:
+            fn()
+        except MixedModelError as exc:
+            ok = fragment.lower() in str(exc).lower()
+            check(f"refuses {label}", ok,
+                  "" if ok else f"wrong reason: {exc}")
+        except Exception as exc:                       # noqa: BLE001
+            check(f"refuses {label}", False,
+                  f"{type(exc).__name__}, not MixedModelError: {exc}")
+        else:
+            check(f"refuses {label}", False, "it solved")
+
+    refuses("a position outside the table",
+            lambda: mixed_model(A, [7]), "outside 0..")
+    refuses("a sector named by code when no codes were given",
+            lambda: mixed_model(A, ["X"]), "no codes")
+    refuses("a code that is not in the table",
+            lambda: mixed_model(A, ["Z"], codes=["A", "B"]),
+            "not a code of this table")
+    refuses("a given change keyed by a code the table does not have",
+            lambda: mixed_model(A, [1], delta_x={"Z": 1.0}, codes=["A", "B"]),
+            "not a code of this table")
+    refuses("a vector of the wrong length",
+            lambda: mixed_model(A, [1], delta_x=[1.0, 2.0, 3.0]),
+            "values for 2 sectors")
+    refuses("codes that do not match the matrix",
+            lambda: mixed_model(A, [1], codes=["A", "B", "C"]),
+            "codes for 2 sectors")
+    refuses("a matrix with a non-finite entry",
+            lambda: mixed_model(np.array([[0.1, np.nan], [0.2, 0.1]]), [1]),
+            "non-finite")
+
+    # The numbers themselves, not the arguments: an endogenous block that buys
+    # from itself as much as it produces has no inverse, and a solver that
+    # returned something here would be returning noise.
+    refuses("an endogenous block that cannot be inverted",
+            lambda: mixed_model(np.array([[1.0, 0.0], [0.0, 0.1]]), [1]),
+            "singular")
+
+    r = mixed_model(A, [1], delta_x={1: 10.0})
+    refuses("an effect coefficient per sector that is not one per sector",
+            lambda: r.effect([1.0, 2.0, 3.0]), "coefficients for 2 sectors")
+
+    # And a sector with no output: a given CHANGE in its output has nothing to
+    # scale, which is about the table rather than about the request.
+    from quadrium.models import IOTable
+    Z = np.array([[1.0, 0.0], [0.0, 0.0]])
+    X = np.array([2.0, 0.0])
+    t = IOTable(table_id="zero", country="XX", year=2021, unit="m",
+                classification="NACE Rev.2", sector_codes=["A", "B"],
+                sector_labels=["A", "B"], Z=Z,
+                Y=np.array([[1.0], [0.0]]), Y_labels=["households"],
+                VA=(X - Z.sum(axis=0)).reshape(1, 2), VA_labels=["VA"],
+                X=X, source="unit test")
+    refuses("a fixed sector with no output at all",
+            lambda: mixed_model_from_table(t, ["B"], delta_x={"B": 1.0}),
+            "nothing to scale")
+    assert len(FAILURES) == _before, FAILURES[_before:]
+
+
+def test_the_multiplier_table_refuses_what_a_caller_can_get_wrong():
+    """Every `MultiplierError` the workbook route cannot reach."""
+    # `check` only APPENDS to FAILURES; under pytest a failed check
+    # prints and passes. These two tests are about refusals that had no
+    # case at all, so a case that cannot fail would be worse than none.
+    _before = len(FAILURES)
+    from quadrium.models import IOTable
+    from quadrium.multipliers import MultiplierError, multiplier_table
+
+    Z = np.array([[2.0, 3.0], [1.0, 4.0]])
+    Y = np.array([[5.0], [6.0]])
+    X = Z.sum(axis=1) + Y.sum(axis=1)
+    VA = (X - Z.sum(axis=0)).reshape(1, 2)
+    t = IOTable(table_id="tiny", country="XX", year=2021, unit="million EUR",
+                classification="NACE Rev.2", sector_codes=["A", "B"],
+                sector_labels=["A", "B"], Z=Z, Y=Y, Y_labels=["households"],
+                VA=VA, VA_labels=["Compensation of employees"], X=X,
+                source="unit test")
+
+    def refuses(label, fn, fragment):
+        try:
+            fn()
+        except MultiplierError as exc:
+            ok = fragment.lower() in str(exc).lower()
+            check(f"refuses {label}", ok,
+                  "" if ok else f"wrong reason: {exc}")
+        except Exception as exc:                       # noqa: BLE001
+            check(f"refuses {label}", False,
+                  f"{type(exc).__name__}, not MultiplierError: {exc}")
+        else:
+            check(f"refuses {label}", False, "it built the table")
+
+    refuses("a row that names nothing",
+            lambda: multiplier_table(t, rows=["  "]), "nothing was named")
+    refuses("a row this table does not have",
+            lambda: multiplier_table(t, rows=["Employment"]),
+            "is not a row of")
+    refuses("an exclusion of a sector that is not in the table",
+            lambda: multiplier_table(t, exclude={"Z": "why"}),
+            "not one of its 2 sectors")
+    refuses("an exclusion with no reason beside it",
+            lambda: multiplier_table(t, exclude={"A": "  "}),
+            "excluded with no reason")
+    refuses("two quantities that would share one column name",
+            lambda: multiplier_table(
+                t, rows=["Compensation of employees", "output"],
+                names={"output": "Compensation of employees"}),
+            "both be called")
+
+    # The type II closure is declared on the table, so naming a row or a
+    # column the table does not carry is caught here and not in the solver.
+    t.type_ii = {"income_rows": ["Wages"], "household": "households"}
+    refuses("a closure on an income row this table does not have",
+            lambda: multiplier_table(t), "income rows this table does not")
+    t.type_ii = {"income_rows": ["Compensation of employees"],
+                 "household": "exports"}
+    refuses("a closure on a final-demand column this table does not have",
+            lambda: multiplier_table(t), "household column")
+    t.type_ii = {}
+
+    # A satellite account whose values are not one per sector. Nothing a
+    # workbook can produce -- `models.py` checks the length at construction --
+    # so it is built here as the stand-in a caller of the API would pass.
+    class Wrong:
+        values = np.array([1.0, 2.0, 3.0])
+        unit = "jobs"
+        source = "unit test"
+        source_year = 2021
+    t.satellites = {"jobs": Wrong()}
+    refuses("a satellite with the wrong number of values",
+            lambda: multiplier_table(t, rows=["jobs"]),
+            "values for 2 sectors")
+    t.satellites = {}
+    assert len(FAILURES) == _before, FAILURES[_before:]

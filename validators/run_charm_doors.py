@@ -171,12 +171,28 @@ def main_() -> int:
                   wrote >= {"trade.csv", "heterogeneity.csv", "report.md",
                             "assumption_ledger.json"},
                   ", ".join(sorted(wrote)))
-            check(f"{who} writes NO regional table and no coefficients",
+            check(f"{who} writes NO regional table, no coefficients and NO "
+                  f"MULTIPLIER TABLE",
                   not (wrote & {"regional_table.xlsx", "coefficients.csv",
-                                "implicit_imports.csv"}),
+                                "implicit_imports.csv",
+                                "multiplier_table.csv", "multipliers.xlsx"}),
                   "CHARM estimates trade, not a technology: a table with one "
                   "residual final-demand column would net E against M and "
-                  "destroy the one quantity the method computes")
+                  "destroy the one quantity the method computes. A multiplier "
+                  "is a column sum of the inverse of that technology, so a "
+                  "multiplier table here would be the NATION's multipliers "
+                  "with a region's name on them — the one reading M-075 says "
+                  "these two methods must never be allowed to share. Added "
+                  "2026-11-13, when the other three building jobs gained one")
+            if (d / "report.md").exists():
+                rep = (d / "report.md").read_text()
+                check(f"{who} SAYS it writes no multiplier table, and why",
+                      "no `multiplier_table.csv`" in rep
+                      and "with a region's name on them" in rep,
+                      "an absence a user cannot look up is an absence they "
+                      "will read as a bug. The three other building jobs "
+                      "write the file, so this one has to account for not "
+                      "writing it")
 
         # ---- 3. THE SAME NUMBERS. Not close: the same.
         if (d_f / "trade.csv").exists() and (d_w / "trade.csv").exists():

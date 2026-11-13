@@ -375,10 +375,22 @@ RECORD = ROOT / "data" / "_refusal_coverage.json"
 # were never counted here and could never be reported uncovered. The sweep
 # caught their raises at run time (it patches the parent class) and kept
 # reporting them as "outside a known raise site"; the complaint was the clue.
+# SIXTEEN SINCE 2026-11-13, and the three added that day were found the same
+# way: by asking what this list leaves out instead of trusting it. The sweep
+# reported 248 sites when the engine had 267. `MixedModelError` accounted for
+# THIRTEEN of the nineteen, every one of them in the mixed-model module shipped
+# the day before -- so the whole of a new feature's refusals were invisible to
+# the counter from the moment it landed. `ProxyValueError` held the other six.
+# Neither subclasses a listed type, so unlike `AccessRefused` the sweep did not
+# even complain about them at run time: they were absent, not miscounted, which
+# is the quieter and worse failure. `MultiplierError` was added with the module
+# that defines it, which is the rule this comment exists to make explicit:
+# A NEW REFUSAL TYPE IS REGISTERED IN THE SAME CHANGE THAT DEFINES IT.
 TYPES = ("BalancingError", "AcquisitionRefused", "AccessRefused", "ConfigError",
          "DisaggregationError", "EurostatError", "SignInfeasibleError",
          "DegenerateMarginError", "MarginImbalanceError", "LoaderError",
-         "ScenarioInfeasible", "TransformationError", "SutEuroError")
+         "ScenarioInfeasible", "TransformationError", "SutEuroError",
+         "MixedModelError", "ProxyValueError", "MultiplierError")
 
 # The refusals that judge the DATA rather than the caller's arguments, and that
 # nothing has reached. Named here so the list is a claim, not a shrug.

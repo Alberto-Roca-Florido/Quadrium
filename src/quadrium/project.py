@@ -60,6 +60,22 @@ class IOProject:
     results: list = field(default_factory=list, init=False)
     meta: dict = field(default_factory=dict, init=False)
 
+    def __post_init__(self) -> None:
+        # `keys` IS A DICT, key_id -> AllocationKey, and a list of the same
+        # objects reads as the obvious alternative. Passing one does not fail
+        # here: it fails 600 lines later inside `_weights`, with a TypeError
+        # raised WHILE A REFUSAL MESSAGE WAS BEING FORMATTED
+        # (`', '.join(sorted(keys))` over AllocationKey objects), so the
+        # diagnosis the engine was in the middle of giving is destroyed by the
+        # way it tried to give it. Checked here, where the caller can see it.
+        if isinstance(self.keys, (list, tuple, set)):
+            raise TypeError(
+                f"`keys` is a {type(self.keys).__name__} of "
+                f"{len(self.keys)} item(s) and must be a dict keyed by "
+                f"`key_id` — {{k.key_id: k for k in your_list}}. A sequence "
+                f"gets as far as the first block that looks a key up and then "
+                f"fails inside the message that would have told you.")
+
     @property
     def dir(self) -> Path:
         return Path(self.root) / self.project_id
@@ -198,6 +214,11 @@ class IOProject:
         mine = {res.scenario_id for res in self.results}
         sdir = d / "scenarios"
         self.removed_scenarios = []
+        # Reasons a scenario got no multiplier table. Surfaced in `summary()`
+        # rather than kept: a file the guide promises and the run did not write
+        # must be accounted for, and a silent absence is the failure this
+        # engine is built to refuse.
+        self.multiplier_refusals: list = []
         if sdir.exists():
             for old in sorted(p for p in sdir.iterdir() if p.is_dir()):
                 if old.name not in mine:
@@ -236,6 +257,26 @@ class IOProject:
             write_json({k: v for k, v in res.diagnostics.items()
                         if k not in ("A", "L")},   # matrices go to CSV, not JSON
                        sd / "diagnostics.json")
+            # THE MULTIPLIER TABLE OF THE SPLIT TABLE, one per scenario.
+            # `report.md` has carried these numbers as prose since the start;
+            # what it could not do is hand them over as a file, so a reader
+            # who wanted the whole cut had to retype a markdown table. The
+            # inverse is formed again here rather than taken from
+            # `res.diagnostics["L"]`, which holds it: one code path builds
+            # this object, and a second route into it is a second thing to
+            # keep in step.
+            #
+            # ⚠ WITH NO INPUT PROFILE EVERY SUBSECTOR GETS ITS PARENT'S
+            # MULTIPLIER -- the weight cancels in `a_ij = Z_ij / X_j`. The
+            # report says so and the file's own comment lines say so, because
+            # the two travel separately and a caveat in one of them is worse
+            # than in neither.
+            from .export import write_multipliers_beside
+            said = write_multipliers_beside(res.table, sd)
+            if said:
+                self.multiplier_refusals.append(
+                    f"{res.scenario_id}: {said}")
+
             # An uncomputable coefficient is written EMPTY, not zero.
             # nan_to_num turned it into 0.00000000, which reads as "this
             # industry buys nothing from that one" -- a plausible-looking
@@ -273,6 +314,8 @@ class IOProject:
         for name in getattr(self, "removed_scenarios", []):
             lines.append(f"  removed stale scenario folder from a previous "
                          f"run: {name}")
+        for why in getattr(self, "multiplier_refusals", []):
+            lines.append(f"  no multiplier_table.csv — {why}")
         for res in self.results:
             b, r = res.diagnostics["balance_info"], res.report
             lines.append(
