@@ -8,15 +8,26 @@ authors:
     orcid: "https://orcid.org/0000-0002-0159-6032"
 repository-code: "https://github.com/Alberto-Roca-Florido/Quadrium"
 license: MIT
-version: 0.2.1
-date-released: 2026-11-10
+version: 0.3.0
+date-released: 2026-11-13
 # The concept DOI stays here, because it always resolves to the latest version
 # and that is what a citation of the software should point at. The version DOI
-# below it is 0.2.0's, assigned by Zenodo on 2026-10-10. This version, 0.2.1,
+# below it is 0.2.0's, assigned by Zenodo on 2026-10-10. This version, 0.3.0,
 # is cut and NOT archived -- archiving is the owner's act -- so it has no
 # version DOI yet, and the one below is labelled with the version it belongs to
 # rather than relabelled as this one's. That relabelling is the error this
 # block already caught once, recorded below.
+#
+# 0.2.1 WAS NEVER RELEASED. It was cut on 2026-11-10, tagged locally, and the
+# release was never made; four commits then added the fifth job (fixing some
+# sectors' output and solving for the rest) and the sixth (the multiplier
+# table). A snapshot at that tag would be missing both, so this freeze is cut
+# at 0.3.0 instead. The v0.2.1 tag is left where it is because it is a real
+# point in the history, not relabelled.
+#
+# THIS IS THE FROZEN SNAPSHOT. Decided by the owner on 2026-11-13: the public
+# repository stops being a continuously mirrored tree and becomes a citable
+# release. See `COMO_PUBLICAR.md`.
 #
 # What must not happen, and nearly did: the entry that stood here before the
 # bump was v0.1.0's (10.5281/zenodo.22345638). Leaving it would have relabelled
